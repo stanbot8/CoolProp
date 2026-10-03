@@ -10,8 +10,7 @@ name: Development Microsoft C++ Code Analysis
 
 on:
   push:
-    branches:
-    - dev_checks
+    branches: [dev_checks]
   #  branches: [ 'master', 'main', 'develop', 'dev_checks' ]
   #  tags: [ 'v*' ]
   #pull_request:
@@ -123,7 +122,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          0e4daacf7e7eea79f280f0c6cf26276d56c73e8cc8484b9f1df0857299a172b2
+          d981e4d7dee5cd881ebb0fa3c917357e330723692b4773f287caacad002d97ef
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

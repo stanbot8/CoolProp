@@ -2,8 +2,7 @@ name: Release workflow run
 
 on:
   push:
-    branches:
-    - feature/automated_release
+    branches: [feature/automated_release]
   #   branches: [ 'master', 'main', 'develop', 'feature/automated_release' ]
   #   tags: [ 'v*' ]
   # pull_request:
@@ -153,8 +152,9 @@ jobs:
       contents: read
     outputs:
       workflows: ${{ steps.resolve.outputs.workflows }}
-    steps: -
-      name: Fetch the sources
+    steps:
+
+    - name: Fetch the sources
       uses: actions/checkout@v7
       with:
         ref: ${{ needs.set_vars.outputs.branch }}
@@ -220,8 +220,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-        - ubuntu
+        os: [ubuntu]
         workflow: ${{ fromJSON(needs.list_builders.outputs.workflows) }}
     uses: ./.github/workflows/release_get_artifact.yml
     with:
@@ -332,8 +331,12 @@ jobs:
     # than inherited, so the repository default cannot widen it later.
     permissions:
       contents: read
-    steps: -
-      uses: actions/setup-python@v7
+    steps:
+
+    # CMakeLists.txt asks for find_package(Python 3.9 REQUIRED), and pinning it
+    # the way packaging_offline.yml does keeps this job from depending on
+    # whatever python3 the runner image happens to ship.
+    - uses: actions/setup-python@v7
       with:
         python-version: 3.x
 
@@ -701,7 +704,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          0df72ab4601183dcf272874d1c41f2738c40206495b347683443e0c10ed1a4b1
+          e5d5c0d4bd285c97196cea8b2a5a44cc19767b6983bfaff87ca826a06434871c
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

@@ -11,18 +11,10 @@ on:
         required: false
         type: boolean
   push:
-    branches:
-    - master
-    - main
-    - develop
-    - actions_docs
-    tags:
-    - v*
+    branches: [master, main, develop, actions_docs]
+    tags: [v*]
   pull_request:
-    branches:
-    - master
-    - main
-    - develop
+    branches: [master, main, develop]
 
 concurrency:
   # Cancel superseded runs on the same ref to cut CI backlog on heavy
@@ -359,7 +351,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          9c72cd5e73514596b09109a22a57db7726b068dec02065b954562c98790b5c84
+          b301ab5c04f60628d42e5c938194f605c576f39f553c9a707537e937cde0956f
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

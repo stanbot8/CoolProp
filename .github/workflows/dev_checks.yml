@@ -20,13 +20,9 @@ name: Development checks
 
 on:
   push:
-    branches:
-    - master
+    branches: [master]
   pull_request:
-    branches:
-    - master
-    - main
-    - develop
+    branches: [master, main, develop]
   schedule:
   - cron: 15 8 * * 0        # weekly Sunday — cppcheck, iwyu fallback
   - cron: 15 8 * * 0,4      # twice weekly Sun+Thu — codeql fallback
@@ -82,10 +78,8 @@ jobs:
     timeout-minutes: 90
     strategy:
       matrix:
-        os:
-        - ubuntu-latest
-        python-version:
-        - 3.13
+        os: [ubuntu-latest]
+        python-version: [3.13]
     steps:
     - name: checkout
       uses: actions/checkout@v7
@@ -621,9 +615,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language:
-        - cpp
-        - python
+        language: [cpp, python]
     steps:
     - name: Checkout
       uses: actions/checkout@v7
@@ -1063,7 +1055,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          8c1d70b1d5ae73c1b6a2a44119f60523f758dfa8da96dc54e6380f329b5d56c1
+          b8f96263836c36986a572560ead400b053775e5e5dc619f60d715f980854b360
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}
