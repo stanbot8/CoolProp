@@ -2,19 +2,19 @@ name: Release workflow run
 
 on:
   push:
-    branches: [ 'feature/automated_release' ]
+    branches: [feature/automated_release]
   #   branches: [ 'master', 'main', 'develop', 'feature/automated_release' ]
   #   tags: [ 'v*' ]
   # pull_request:
   #   branches: [ 'master', 'main', 'develop' ]
   schedule:
-    - cron: '0 2 * * *' # daily
+  - cron: 0 2 * * *     # daily
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch or tag to retrieve the binaries from'
+        description: Branch or tag to retrieve the binaries from
         required: false
-        default: 'master'
+        default: master
 
 jobs:
   # release_job:    
@@ -22,7 +22,6 @@ jobs:
   #   with:
   #     branch: master
   #     target: nightly
-  
   # get_latest_tag:
   #   runs-on: ubuntu-latest
   #   outputs:
@@ -38,7 +37,6 @@ jobs:
   #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   #     - run: "echo latest release id: ${{ fromJson(steps.get_latest_release.outputs.data).id }}"
   #     - run: "echo latest release tag: ${{ fromJson(steps.get_latest_release.outputs.data).tag_name }}"
-  
   set_vars:
     runs-on: ubuntu-latest
     # This job only derives strings from the dispatch input; it makes no API
@@ -52,85 +50,85 @@ jobs:
       webdir: ${{ steps.propagate_vars.outputs.webdir }}
 
     steps:
-      - id: propagate_vars
-        shell: bash
+    - id: propagate_vars
+      shell: bash
         # INPUT_BRANCH arrives through env instead of being interpolated into
         # the script body.  A ${{ }} expression is substituted into the shell
         # SOURCE TEXT before bash parses it, so the previous
         #     echo "BRANCH=${{ ... || inputs.branch }}" >> $GITHUB_ENV
         # executed a dispatch input of  x" ; <cmd> ; echo "  as shell code, in
         # a job holding a write-scoped GITHUB_TOKEN.  Through env it is data.
-        env:
-          INPUT_BRANCH: ${{ inputs.branch }}
-        run: |
-          set -euo pipefail
+      env:
+        INPUT_BRANCH: ${{ inputs.branch }}
+      run: |
+        set -euo pipefail
 
-          # Branch or tag to collect the binaries from; schedule/push events
-          # carry no inputs at all, so an empty value means master.
-          BRANCH="${INPUT_BRANCH:-master}"
+        # Branch or tag to collect the binaries from; schedule/push events
+        # carry no inputs at all, so an empty value means master.
+        BRANCH="${INPUT_BRANCH:-master}"
 
-          # Validate before the value reaches any other job.  branch, and the
-          # target derived from it, are interpolated into run: blocks
-          # downstream -- including the rsync destination in deploy_files,
-          # which holds the SourceForge SSH key -- and are written to
-          # GITHUB_OUTPUT, where an embedded newline would forge extra
-          # outputs.  Restricting to git ref-name characters closes both.
-          case "$BRANCH" in
-            *[!A-Za-z0-9._/-]*)
-              echo "::error::Refusing branch input '$BRANCH': only A-Z a-z 0-9 . _ / - are allowed in a ref name."
-              exit 1
-              ;;
-          esac
-
-          # The character class above still admits '..', '//', and a leading or
-          # trailing '/', none of which are legal in a ref and all of which
-          # traverse out of the rsync destination: BRANCH='../../foo' yields
-          # TARGET='../../foo' and a destination of
-          # /home/frs/project/coolprop/CoolProp/../../foo -> /home/frs/project/foo.
-          # git's own validator is the authority on ref syntax; prefixing
-          # refs/heads/ makes a single-level name like 'master' valid without
-          # --allow-onelevel.  Both checks are needed and neither subsumes the
-          # other: check-ref-format permits ';', '$', '&' and quotes, which
-          # have no business in a path we interpolate into a shell command,
-          # while the character class permits the traversal forms above.
-          if ! git check-ref-format "refs/heads/$BRANCH"; then
-            echo "::error::Refusing branch input '$BRANCH': not a well-formed git ref name."
+        # Validate before the value reaches any other job.  branch, and the
+        # target derived from it, are interpolated into run: blocks
+        # downstream -- including the rsync destination in deploy_files,
+        # which holds the SourceForge SSH key -- and are written to
+        # GITHUB_OUTPUT, where an embedded newline would forge extra
+        # outputs.  Restricting to git ref-name characters closes both.
+        case "$BRANCH" in
+          *[!A-Za-z0-9._/-]*)
+            echo "::error::Refusing branch input '$BRANCH': only A-Z a-z 0-9 . _ / - are allowed in a ref name."
             exit 1
-          fi
+            ;;
+        esac
 
-          # Read a version number out of the ref if there is one, so that
-          # 'v7.1.0' publishes to the 7.1.0 directory.  grep exits 1 when
-          # nothing matches, which is the normal branch-name case, not an
-          # error -- hence '|| true'.  Keep only the first match: grep -Eo
-          # prints one line per match, and a multi-line value would corrupt
-          # GITHUB_OUTPUT the same way a newline in the input would.
-          TARGET="$(printf '%s' "$BRANCH" | grep -Eo '[0-9]+(\.[0-9]+)*' || true)"
-          TARGET="${TARGET%%$'\n'*}"
+        # The character class above still admits '..', '//', and a leading or
+        # trailing '/', none of which are legal in a ref and all of which
+        # traverse out of the rsync destination: BRANCH='../../foo' yields
+        # TARGET='../../foo' and a destination of
+        # /home/frs/project/coolprop/CoolProp/../../foo -> /home/frs/project/foo.
+        # git's own validator is the authority on ref syntax; prefixing
+        # refs/heads/ makes a single-level name like 'master' valid without
+        # --allow-onelevel.  Both checks are needed and neither subsumes the
+        # other: check-ref-format permits ';', '$', '&' and quotes, which
+        # have no business in a path we interpolate into a shell command,
+        # while the character class permits the traversal forms above.
+        if ! git check-ref-format "refs/heads/$BRANCH"; then
+          echo "::error::Refusing branch input '$BRANCH': not a well-formed git ref name."
+          exit 1
+        fi
 
-          # No version in the name: master publishes as the nightly, any other
-          # branch publishes under its own name.
-          if [ -z "$TARGET" ]; then
-            if [ "$BRANCH" = "master" ]; then
-              TARGET="nightly"
-            else
-              TARGET="$BRANCH"
-            fi
-          fi
+        # Read a version number out of the ref if there is one, so that
+        # 'v7.1.0' publishes to the 7.1.0 directory.  grep exits 1 when
+        # nothing matches, which is the normal branch-name case, not an
+        # error -- hence '|| true'.  Keep only the first match: grep -Eo
+        # prints one line per match, and a multi-line value would corrupt
+        # GITHUB_OUTPUT the same way a newline in the input would.
+        TARGET="$(printf '%s' "$BRANCH" | grep -Eo '[0-9]+(\.[0-9]+)*' || true)"
+        TARGET="${TARGET%%$'\n'*}"
 
-          # Nightlies go to the 'dev' subdirectory of the web root, releases
-          # to the root itself.
-          if [ "$TARGET" = "nightly" ]; then
-            WEBDIR="dev"
+        # No version in the name: master publishes as the nightly, any other
+        # branch publishes under its own name.
+        if [ -z "$TARGET" ]; then
+          if [ "$BRANCH" = "master" ]; then
+            TARGET="nightly"
           else
-            WEBDIR="."
+            TARGET="$BRANCH"
           fi
+        fi
 
-          echo "branch=$BRANCH  target=$TARGET  webdir=$WEBDIR"
-          {
-            echo "branch=$BRANCH"
-            echo "target=$TARGET"
-            echo "webdir=$WEBDIR"
-          } >> "$GITHUB_OUTPUT"
+        # Nightlies go to the 'dev' subdirectory of the web root, releases
+        # to the root itself.
+        if [ "$TARGET" = "nightly" ]; then
+          WEBDIR="dev"
+        else
+          WEBDIR="."
+        fi
+
+        echo "branch=$BRANCH  target=$TARGET  webdir=$WEBDIR"
+        {
+          echo "branch=$BRANCH"
+          echo "target=$TARGET"
+          echo "webdir=$WEBDIR"
+        } >> "$GITHUB_OUTPUT"
 
 
   # Single source of truth for the builder workflows whose artifacts make up a
@@ -140,8 +138,14 @@ jobs:
   # action-download-artifact and takes the whole deploy down with it -- which is
   # exactly how gh#3315 went unnoticed for six weeks after PR #3245 renamed
   # csharp_builder.yml into java_builder.yml.
+    needs:
+    - alpha_bridge_inputs
+    if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
+      }}
   list_builders:
-    needs: [set_vars]
+    needs:
+    - set_vars
+    - alpha_bridge_inputs
     name: Resolve the builder workflow list
     runs-on: ubuntu-latest
     permissions:
@@ -150,64 +154,69 @@ jobs:
       workflows: ${{ steps.resolve.outputs.workflows }}
     steps:
 
-      - name: Fetch the sources
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.set_vars.outputs.branch }}
+    - name: Fetch the sources
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.set_vars.outputs.branch }}
 
-      - name: Resolve and validate the builder list
-        id: resolve
-        shell: bash
+    - name: Resolve and validate the builder list
+      id: resolve
+      shell: bash
         # BRANCH goes through env rather than being interpolated into the
         # script body, so a crafted workflow_dispatch input cannot inject shell.
-        env:
-          BRANCH: ${{ needs.set_vars.outputs.branch }}
-        run: |
-          set -euo pipefail
-          # Add a builder here to have its artifacts included in the release.
-          # Every entry must name a file under .github/workflows/.
-          builders=(
-            javascript_builder.yml
-            library_shared.yml
-            windows_installer.yml
-            docs_docker-run.yml
-            libreoffice_builder.yml
-            mathcad_builder.yml
-            csharp_builder.yml
-            java_builder.yml
-            # python_buildwheels.yml -- wheels ship via PyPI, not the file drop
-          )
-          # An all-commented-out list would otherwise sail through every check
-          # below, hand collect_binaries an empty matrix, and let deploy_files
-          # publish a release containing nothing but the source zip.
-          if [ "${#builders[@]}" -eq 0 ]; then
-            echo "::error::The builders list in release_all_files.yml is empty; there would be no binaries to release."
-            exit 1
+      env:
+        BRANCH: ${{ needs.set_vars.outputs.branch }}
+      run: |
+        set -euo pipefail
+        # Add a builder here to have its artifacts included in the release.
+        # Every entry must name a file under .github/workflows/.
+        builders=(
+          javascript_builder.yml
+          library_shared.yml
+          windows_installer.yml
+          docs_docker-run.yml
+          libreoffice_builder.yml
+          mathcad_builder.yml
+          csharp_builder.yml
+          java_builder.yml
+          # python_buildwheels.yml -- wheels ship via PyPI, not the file drop
+        )
+        # An all-commented-out list would otherwise sail through every check
+        # below, hand collect_binaries an empty matrix, and let deploy_files
+        # publish a release containing nothing but the source zip.
+        if [ "${#builders[@]}" -eq 0 ]; then
+          echo "::error::The builders list in release_all_files.yml is empty; there would be no binaries to release."
+          exit 1
+        fi
+        missing=()
+        for wf in "${builders[@]}"; do
+          if [ -f ".github/workflows/$wf" ]; then
+            echo "found   $wf"
+          else
+            echo "MISSING $wf"
+            missing+=("$wf")
           fi
-          missing=()
-          for wf in "${builders[@]}"; do
-            if [ -f ".github/workflows/$wf" ]; then
-              echo "found   $wf"
-            else
-              echo "MISSING $wf"
-              missing+=("$wf")
-            fi
-          done
-          if [ "${#missing[@]}" -ne 0 ]; then
-            echo "::error::Builder workflows listed by release_all_files.yml do not exist on '${BRANCH}': ${missing[*]}. A builder was renamed, deleted, or never landed on this branch; fix the file or update the builders list in release_all_files.yml."
-            exit 1
-          fi
-          # jq --args quotes each element for us, so the JSON stays valid no
-          # matter what ends up in the list.  Assign first rather than inlining
-          # the substitution into echo: `echo "x=$(jq ...)"` exits 0 even when
-          # jq dies, which would emit an empty output and fail downstream with
-          # an unrelated fromJSON error.  A bare assignment propagates jq's
-          # status, so `set -e` stops here instead.
-          workflows=$(jq -cn '$ARGS.positional' --args "${builders[@]}")
-          echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
+        done
+        if [ "${#missing[@]}" -ne 0 ]; then
+          echo "::error::Builder workflows listed by release_all_files.yml do not exist on '${BRANCH}': ${missing[*]}. A builder was renamed, deleted, or never landed on this branch; fix the file or update the builders list in release_all_files.yml."
+          exit 1
+        fi
+        # jq --args quotes each element for us, so the JSON stays valid no
+        # matter what ends up in the list.  Assign first rather than inlining
+        # the substitution into echo: `echo "x=$(jq ...)"` exits 0 even when
+        # jq dies, which would emit an empty output and fail downstream with
+        # an unrelated fromJSON error.  A bare assignment propagates jq's
+        # status, so `set -e` stops here instead.
+        workflows=$(jq -cn '$ARGS.positional' --args "${builders[@]}")
+        echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
 
+    if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
+      }}
   collect_binaries:
-    needs: [set_vars, list_builders]
+    needs:
+    - set_vars
+    - list_builders
+    - alpha_bridge_inputs
     strategy:
       fail-fast: false
       matrix:
@@ -218,18 +227,21 @@ jobs:
       branch: ${{ needs.set_vars.outputs.branch }}
       workflow: ${{ matrix.workflow }}
 
+    if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
+      }}
   prepare_sources:
-    needs: [set_vars]
+    needs:
+    - set_vars
+    - alpha_bridge_inputs
     name: Prepare the source code
-    runs-on: ubuntu-latest    
+    runs-on: ubuntu-latest
     steps:
-    
     - name: Fetch the sources
       uses: actions/checkout@v7
       with:
         ref: ${{ needs.set_vars.outputs.branch }}
         path: source
-        
+
     # The offline tarball the Linux distribution packaging consumes (GH #3388).
     # It is a second output of this job rather than a job of its own, so there
     # stays one place that prepares sources for a release.
@@ -259,7 +271,7 @@ jobs:
         zip -rq CoolProp_sources.zip source
         mkdir -p binaries/source
         mv CoolProp_sources.zip binaries/source/
-        
+
     - name: Store artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -305,8 +317,13 @@ jobs:
   # Worth knowing before pointing anyone at it: the runner's glibc sets the
   # oldest distribution this can run on.  It is a convenience build for current
   # systems, not a manylinux-style portable artifact.
+    if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
+      }}
   prepare_linux_tarball:
-    needs: [set_vars, prepare_sources]
+    needs:
+    - set_vars
+    - prepare_sources
+    - alpha_bridge_inputs
     name: Build the relocatable Linux tarball
     runs-on: ubuntu-latest
     # Nothing here writes through the Actions token; download-artifact uses the
@@ -321,7 +338,7 @@ jobs:
     # whatever python3 the runner image happens to ship.
     - uses: actions/setup-python@v7
       with:
-        python-version: '3.x'
+        python-version: 3.x
 
     - name: Download the source tarball
       uses: actions/download-artifact@v8
@@ -592,12 +609,18 @@ jobs:
         if-no-files-found: error
 
 
+    if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
+      }}
   deploy_files:
-    needs: [set_vars, collect_binaries, prepare_sources, prepare_linux_tarball]  # prepare_mathcad
+    needs:                                                                       # prepare_mathcad
+    - set_vars
+    - collect_binaries
+    - prepare_sources
+    - prepare_linux_tarball
+    - alpha_bridge_inputs
     name: Deploy collected files
     runs-on: ubuntu-latest
-    steps:  
-    
+    steps:
     - name: Download binaries
       uses: actions/download-artifact@v8
       with:
@@ -608,7 +631,7 @@ jobs:
         # into the same binaries directory.
         merge-multiple: true
         path: binaries
-        
+
     - name: Create info files
       run: |
         echo    "CoolProp ${{ needs.set_vars.outputs.target }} binaries"                    > binaries/README.rst.txt
@@ -621,13 +644,13 @@ jobs:
         echo "nightly: python -m pip install -i https://test.pypi.org/simple/ CoolProp" >> binaries/Python/README.txt
         echo "release: python -m pip install --upgrade CoolProp"                        >> binaries/Python/README.txt
         cat binaries/Python/README.txt
-        
+
     - name: Display structure of downloaded files
       run: |
         set -x
         ls -R
         du -sh
-        
+
     - name: Install SSH key
       uses: shimataro/ssh-key-action@v2
       with:
@@ -641,7 +664,6 @@ jobs:
             IdentityFile ~/.ssh/id_rsa-${{ secrets.SF_SSH_USER }}
             PubkeyAcceptedKeyTypes +ssh-rsa
         if_key_exists: fail # replace / ignore / fail; optional (defaults to fail)
-        
     - name: Fix the docs
       run: |
         rm -rf binaries/github-pages
@@ -652,10 +674,83 @@ jobs:
         zip -rq documentation.zip html
         rm -rf binaries/docs/*
         mv documentation.zip binaries/docs/        
-    
+
     - name: Upload using rsync over SSH
       run: |
         RSYNC_DRY_RUN=
         RSYNC_OPTS="-a --chmod=Dug=rwx,Do=rx,Fug=rw,Fo=r -z --stats --delete"
         rsync $RSYNC_DRY_RUN $RSYNC_OPTS "binaries/" frs.sf.net-${{ secrets.SF_SSH_USER }}:/home/frs/project/coolprop/CoolProp/${{ needs.set_vars.outputs.target }}
         rsync $RSYNC_DRY_RUN $RSYNC_OPTS "html/"     frs.sf.net-${{ secrets.SF_SSH_USER }}:/home/project-web/coolprop/htdocs/${{ needs.set_vars.outputs.webdir }}
+    if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
+      }}
+  alpha_bridge_inputs:
+    name: AlphaBridge input check
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    concurrency:
+      group: alpha-bridge-inputs-${{ github.workflow }}-${{ github.sha }}-${{ 
+        github.event.schedule || github.event_name }}
+      cancel-in-progress: false
+    outputs:
+      changed: ${{ steps.identity.outputs.changed }}
+    steps:
+    - id: identity
+      name: Check source, workflow, variables, and runner inputs
+      env:
+        GH_TOKEN: ${{ github.token }}
+        AB_REPOSITORY: ${{ github.repository }}
+        AB_RUN_ID: ${{ github.run_id }}
+        AB_HEAD_SHA: ${{ github.sha }}
+        AB_EVENT: ${{ github.event_name }}
+        AB_SCHEDULE: ${{ github.event.schedule || '' }}
+        AB_VARIABLES: ${{ toJSON(vars) }}
+        AB_INPUTS: ${{ toJSON(inputs) }}
+      shell: bash
+      run: "python3 - <<'ALPHA_BRIDGE_CI_PY'\n\"\"\"Native scheduled-CI input check,
+        embedded in the owned fork configuration.\"\"\"\n\nfrom __future__ import
+        annotations\n\nimport hashlib\nimport json\nimport os\nimport urllib.parse\n\
+        import urllib.request\n\n\ndef changed(get, *, repository, run_id, identity,
+        job_name):\n    current = get(f\"/repos/{repository}/actions/runs/{run_id}\"\
+        )\n    event = current[\"event\"]\n    query = urllib.parse.urlencode(\n \
+        \       {\n            \"head_sha\": current[\"head_sha\"],\n            \"\
+        event\": event,\n            \"per_page\": 100,\n        }\n    )\n    runs
+        = get(f\"/repos/{repository}/actions/workflows/{current['workflow_id']}/runs?{query}\"\
+        )\n    for run in runs[\"workflow_runs\"]:\n        if run[\"id\"] == run_id:\n\
+        \            continue\n        if run.get(\"head_sha\") != current[\"head_sha\"\
+        ] or run.get(\"event\") != event:\n            raise ValueError(\"provider
+        returned a different CI input identity\")\n        page = 1\n        while
+        True:\n            jobs = get(\n                f\"/repos/{repository}/actions/runs/{run['id']}/jobs?per_page=100&page={page}\"\
+        \n            )[\"jobs\"]\n            for job in jobs:\n                if
+        (\n                    job[\"name\"] == job_name\n                    and
+        job.get(\"status\") == \"completed\"\n                    and job.get(\"conclusion\"\
+        ) == \"success\"\n                    and any(\n                        step[\"\
+        name\"] == f\"AlphaBridge input identity {identity}\"\n                  \
+        \      and step.get(\"conclusion\") == \"success\"\n                     \
+        \   for step in job.get(\"steps\", [])\n                    )\n          \
+        \      ):\n                    return False\n            if len(jobs) < 100:\n\
+        \                break\n            page += 1\n    return True\n\n\ndef main():\n\
+        \    inputs = {\n        \"configuration_commit\": os.environ[\"AB_HEAD_SHA\"\
+        ],\n        \"event\": os.environ[\"AB_EVENT\"],\n        \"schedule\": os.environ[\"\
+        AB_SCHEDULE\"],\n        \"variables\": json.loads(os.environ[\"AB_VARIABLES\"\
+        ]),\n        \"inputs\": json.loads(os.environ[\"AB_INPUTS\"]),\n        \"\
+        runner_image\": [os.environ.get(\"ImageOS\", \"\"), os.environ.get(\"ImageVersion\"\
+        , \"\")],\n    }\n    identity = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()\n\
+        \n    def get(path):\n        request = urllib.request.Request(\n        \
+        \    \"https://api.github.com\" + path,\n            headers={\n         \
+        \       \"Authorization\": \"Bearer \" + os.environ[\"GH_TOKEN\"],\n     \
+        \           \"Accept\": \"application/vnd.github+json\",\n               \
+        \ \"X-GitHub-Api-Version\": \"2026-03-10\",\n            },\n        )\n \
+        \       with urllib.request.urlopen(request, timeout=60) as response:\n  \
+        \          return json.load(response)\n\n    should_run = inputs[\"event\"\
+        ] != \"schedule\" or changed(\n        get,\n        repository=os.environ[\"\
+        AB_REPOSITORY\"],\n        run_id=int(os.environ[\"AB_RUN_ID\"]),\n      \
+        \  identity=identity,\n        job_name=\"AlphaBridge input check\",\n   \
+        \ )\n    with open(os.environ[\"GITHUB_OUTPUT\"], \"a\", encoding=\"utf-8\"\
+        ) as output:\n        output.write(f\"digest={identity}\\nchanged={str(should_run).lower()}\\\
+        n\")\n    print(\"CI inputs changed\" if should_run else \"CI inputs unchanged;
+        build and test jobs skipped\")\n\n\nif __name__ == \"__main__\":\n    main()\n\
+        \nALPHA_BRIDGE_CI_PY\n"
+    - name: AlphaBridge input identity ${{ steps.identity.outputs.digest }}
+      run: echo 'Input identity recorded'

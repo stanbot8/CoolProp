@@ -2,19 +2,19 @@ name: Documentation builds (HTML)
 
 on:
   schedule:
-    - cron: '0 2 * * *' # daily
-    - cron: '0 4 * * 1' # weekly
+  - cron: 0 2 * * *     # daily
+  - cron: 0 4 * * 1     # weekly
   workflow_dispatch:
     inputs:
       expensive:
-        description: 'Build expensive docs'
+        description: Build expensive docs
         required: false
         type: boolean
   push:
-    branches: [ 'master', 'main', 'develop', 'actions_docs' ]
-    tags: [ 'v*' ]
+    branches: [master, main, develop, actions_docs]
+    tags: [v*]
   pull_request:
-    branches: [ 'master', 'main', 'develop' ]
+    branches: [master, main, develop]
 
 concurrency:
   # Cancel superseded runs on the same ref to cut CI backlog on heavy
@@ -22,7 +22,9 @@ concurrency:
   # / develop and tags never cancel, so mainline + release runs always
   # complete.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && (github.ref != 
+    'refs/heads/master' && github.ref != 'refs/heads/main' && github.ref != 
+    'refs/heads/develop' && !startsWith(github.ref, 'refs/tags/')) }}
 
 jobs:
   build:
@@ -37,7 +39,8 @@ jobs:
       # on the cacheable workspace.  Must be an absolute path inside the
       # container — github.workspace is the bind-mounted workspace, so the
       # host-side actions/cache step sees the same files.
-      COOLPROP_ALTERNATIVE_SVDTABLES_DIRECTORY: ${{ github.workspace }}/.svdtables-cache
+      COOLPROP_ALTERNATIVE_SVDTABLES_DIRECTORY: ${{ github.workspace 
+        }}/.svdtables-cache
 
       # Compiler cache for the wrapper-example builds (LinuxRun.py).  Each
       # COOLPROP_*_MODULE build recompiles the CoolProp core from scratch, so
@@ -55,21 +58,20 @@ jobs:
       image: ghcr.io/coolprop/coolprop_docs_02_builder:dev
       # options: --user 1001 --group 1001
       credentials:
-         username: ${{ github.actor }}
-         password: ${{ secrets.GITHUB_TOKEN }}
-         
-    steps: 
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
     - uses: actions/checkout@v7
       with:
         fetch-depth: 0  # Fetch all history for git revision info
-    
     - name: Set up Git
       run: |
         git config --global --add safe.directory $GITHUB_WORKSPACE
         # Get the full git revision hash
         git rev-parse HEAD > dev/gitrevision.txt
         echo "Git revision: $(cat dev/gitrevision.txt)"
-    
+
     - uses: actions/cache@v6
       if: ${{ !env.ACT }} # skip during local actions testing
       id: cached-props # steps.cached-props.outputs.cache-hit != 'true'
@@ -86,7 +88,8 @@ jobs:
         # the cache and triggers a consistency-plot refresh for the new fluid.
         # The restore-keys fallback still seeds the directory with prior plots
         # so the incremental Consistency.py only has to regenerate what changed.
-        key: cached-props-${{ hashFiles('dev/fluids/*.json', 'dev/incompressible_liquids/json/*.json') }}
+        key: cached-props-${{ hashFiles('dev/fluids/*.json', 
+          'dev/incompressible_liquids/json/*.json') }}
         restore-keys: |
           cached-props-
 
@@ -104,7 +107,10 @@ jobs:
       if: ${{ !env.ACT }}
       with:
         path: .svdtables-cache
-        key: svd-tables-${{ hashFiles('dev/fluids/*.json', 'src/SBTL/**', 'src/Backends/SVDSBTL/**', 'src/Region/**', 'include/CoolProp/sbtl/**', 'Web/coolprop/_gen/gen_SVDSBTLValidation.py') }}
+        key: svd-tables-${{ hashFiles('dev/fluids/*.json', 'src/SBTL/**', 
+          'src/Backends/SVDSBTL/**', 'src/Region/**', 
+          'include/CoolProp/sbtl/**', 
+          'Web/coolprop/_gen/gen_SVDSBTLValidation.py') }}
 
     # Persist the ccache dir (CCACHE_DIR, set at job level) across runs so the
     # wrapper-example builds also reuse the CoolProp core compiled by previous
@@ -141,7 +147,7 @@ jobs:
         echo ${{ github.ref }}
         echo "COOLPROP_TAGGED=${{ contains(github.ref, 'refs/tags') }}" >> $GITHUB_ENV
         cat $GITHUB_ENV
-        
+
     - name: Variable calculations
       id: variable_calculation
       shell: bash
@@ -151,7 +157,7 @@ jobs:
         echo "COOLPROP_VERSION=$(python dev/extract_version.py --cmake-only)" >> $GITHUB_ENV
         echo "COOLPROP_EXPENSIVE=${{ (steps.cached-props.outputs.cache-hit != 'true') || inputs.expensive || env.COOLPROP_TAGGED || env.COOLPROP_WEEKLY }}" >> $GITHUB_ENV
         cat $GITHUB_ENV
-    
+
     - name: Build and install wheel using bdist_wheel
       shell: bash
       run: |
@@ -170,7 +176,7 @@ jobs:
         # nbconvert --allow-errors silently renders those pages as import-error
         # tracebacks.
         pip install pydata-sphinx-theme tqdm ninja sphinx-design plotly joblib
-        
+
     - name: Test the installed CoolProp version
       shell: bash
       run: |
@@ -178,7 +184,7 @@ jobs:
         python -c "import CoolProp; print(CoolProp.__version__)"
         python -c "import CoolProp; print(CoolProp.__gitrevision__)"
         python -c "import CoolProp; print(CoolProp.__file__)"
-        
+
     - name: Install ccache (runtime escape hatch until the docs image rebuilds)
       shell: bash
       run: |
@@ -211,7 +217,9 @@ jobs:
     # build (the only ccache writer) so a later doxygen/sphinx failure doesn't
     # discard a cache from an otherwise-good wrapper build.
     - uses: actions/cache/save@v6
-      if: ${{ success() && !env.ACT && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+      if: ${{ success() && !env.ACT && (github.event_name == 'push' || 
+        github.event_name == 'schedule' || github.event_name == 
+        'workflow_dispatch') }}
       with:
         path: .ccache
         key: docs-ccache-${{ github.sha }}
@@ -222,7 +230,7 @@ jobs:
         source activate docs
         doxygen --version
         doxygen Doxyfile
-        
+
     - name: Build documentation with Sphinx
       working-directory: ./Web
       shell: bash
@@ -248,23 +256,21 @@ jobs:
       uses: actions/upload-pages-artifact@v5
       with:
         path: ./Web/_build/html/
-    
+
     - name: Zip the HTML documentation
       working-directory: ./Web/_build/
       shell: bash
       run: |
         tar -cvzf CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.tar.gz html/*
       # zip -rq   CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.zip    html/*
-    
     - name: Archive TGZ or ZIP artifacts
       if: ${{ !env.ACT }} # skip during local actions testing
       uses: actions/upload-artifact@v7
       with:
-          name: docs
-          path: |
-            Web/_build/CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.tar.gz
-          # Web/_build/CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.zip
-    
+        name: docs
+        path: |
+          Web/_build/CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.tar.gz
+         # Web/_build/CoolProp-${{ env.COOLPROP_VERSION }}-documentation-html.zip
     #- name: Upload TGZ or ZIP to release
     #  if: contains(github.ref, 'refs/tags')
     #  uses: svenstaro/upload-release-action@v2
@@ -276,11 +282,18 @@ jobs:
     #    file_glob: false
 
   # Deploy job
+    needs:
+    - alpha_bridge_inputs
+    if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
+      }}
   deploy:
     # Add a dependency to the build job
-    needs: build
+    needs:
     # Do not deploy intermediate builds, only deploy on tags
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    - build
+    - alpha_bridge_inputs
+    if: ${{ (startsWith(github.ref, 'refs/tags/')) && 
+      needs.alpha_bridge_inputs.outputs.changed == 'true' }}
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
     permissions:
@@ -300,3 +313,74 @@ jobs:
       if: ${{ !env.ACT }} # skip during local actions testing
       id: deployment
       uses: actions/deploy-pages@v5
+  alpha_bridge_inputs:
+    name: AlphaBridge input check
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    concurrency:
+      group: alpha-bridge-inputs-${{ github.workflow }}-${{ github.sha }}-${{ 
+        github.event.schedule || github.event_name }}
+      cancel-in-progress: false
+    outputs:
+      changed: ${{ steps.identity.outputs.changed }}
+    steps:
+    - id: identity
+      name: Check source, workflow, variables, and runner inputs
+      env:
+        GH_TOKEN: ${{ github.token }}
+        AB_REPOSITORY: ${{ github.repository }}
+        AB_RUN_ID: ${{ github.run_id }}
+        AB_HEAD_SHA: ${{ github.sha }}
+        AB_EVENT: ${{ github.event_name }}
+        AB_SCHEDULE: ${{ github.event.schedule || '' }}
+        AB_VARIABLES: ${{ toJSON(vars) }}
+        AB_INPUTS: ${{ toJSON(inputs) }}
+      shell: bash
+      run: "python3 - <<'ALPHA_BRIDGE_CI_PY'\n\"\"\"Native scheduled-CI input check,
+        embedded in the owned fork configuration.\"\"\"\n\nfrom __future__ import
+        annotations\n\nimport hashlib\nimport json\nimport os\nimport urllib.parse\n\
+        import urllib.request\n\n\ndef changed(get, *, repository, run_id, identity,
+        job_name):\n    current = get(f\"/repos/{repository}/actions/runs/{run_id}\"\
+        )\n    event = current[\"event\"]\n    query = urllib.parse.urlencode(\n \
+        \       {\n            \"head_sha\": current[\"head_sha\"],\n            \"\
+        event\": event,\n            \"per_page\": 100,\n        }\n    )\n    runs
+        = get(f\"/repos/{repository}/actions/workflows/{current['workflow_id']}/runs?{query}\"\
+        )\n    for run in runs[\"workflow_runs\"]:\n        if run[\"id\"] == run_id:\n\
+        \            continue\n        if run.get(\"head_sha\") != current[\"head_sha\"\
+        ] or run.get(\"event\") != event:\n            raise ValueError(\"provider
+        returned a different CI input identity\")\n        page = 1\n        while
+        True:\n            jobs = get(\n                f\"/repos/{repository}/actions/runs/{run['id']}/jobs?per_page=100&page={page}\"\
+        \n            )[\"jobs\"]\n            for job in jobs:\n                if
+        (\n                    job[\"name\"] == job_name\n                    and
+        job.get(\"status\") == \"completed\"\n                    and job.get(\"conclusion\"\
+        ) == \"success\"\n                    and any(\n                        step[\"\
+        name\"] == f\"AlphaBridge input identity {identity}\"\n                  \
+        \      and step.get(\"conclusion\") == \"success\"\n                     \
+        \   for step in job.get(\"steps\", [])\n                    )\n          \
+        \      ):\n                    return False\n            if len(jobs) < 100:\n\
+        \                break\n            page += 1\n    return True\n\n\ndef main():\n\
+        \    inputs = {\n        \"configuration_commit\": os.environ[\"AB_HEAD_SHA\"\
+        ],\n        \"event\": os.environ[\"AB_EVENT\"],\n        \"schedule\": os.environ[\"\
+        AB_SCHEDULE\"],\n        \"variables\": json.loads(os.environ[\"AB_VARIABLES\"\
+        ]),\n        \"inputs\": json.loads(os.environ[\"AB_INPUTS\"]),\n        \"\
+        runner_image\": [os.environ.get(\"ImageOS\", \"\"), os.environ.get(\"ImageVersion\"\
+        , \"\")],\n    }\n    identity = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()\n\
+        \n    def get(path):\n        request = urllib.request.Request(\n        \
+        \    \"https://api.github.com\" + path,\n            headers={\n         \
+        \       \"Authorization\": \"Bearer \" + os.environ[\"GH_TOKEN\"],\n     \
+        \           \"Accept\": \"application/vnd.github+json\",\n               \
+        \ \"X-GitHub-Api-Version\": \"2026-03-10\",\n            },\n        )\n \
+        \       with urllib.request.urlopen(request, timeout=60) as response:\n  \
+        \          return json.load(response)\n\n    should_run = inputs[\"event\"\
+        ] != \"schedule\" or changed(\n        get,\n        repository=os.environ[\"\
+        AB_REPOSITORY\"],\n        run_id=int(os.environ[\"AB_RUN_ID\"]),\n      \
+        \  identity=identity,\n        job_name=\"AlphaBridge input check\",\n   \
+        \ )\n    with open(os.environ[\"GITHUB_OUTPUT\"], \"a\", encoding=\"utf-8\"\
+        ) as output:\n        output.write(f\"digest={identity}\\nchanged={str(should_run).lower()}\\\
+        n\")\n    print(\"CI inputs changed\" if should_run else \"CI inputs unchanged;
+        build and test jobs skipped\")\n\n\nif __name__ == \"__main__\":\n    main()\n\
+        \nALPHA_BRIDGE_CI_PY\n"
+    - name: AlphaBridge input identity ${{ steps.identity.outputs.digest }}
+      run: echo 'Input identity recorded'

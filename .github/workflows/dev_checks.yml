@@ -24,8 +24,8 @@ on:
   pull_request:
     branches: [master, main, develop]
   schedule:
-    - cron: '15 8 * * 0'    # weekly Sunday — cppcheck, iwyu fallback
-    - cron: '15 8 * * 0,4'  # twice weekly Sun+Thu — codeql fallback
+  - cron: 15 8 * * 0        # weekly Sunday — cppcheck, iwyu fallback
+  - cron: 15 8 * * 0,4      # twice weekly Sun+Thu — codeql fallback
   workflow_dispatch:
 
 concurrency:
@@ -34,12 +34,15 @@ concurrency:
   # / develop and tags never cancel, so mainline + release runs always
   # complete.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' && !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && (github.ref != 
+    'refs/heads/master' && github.ref != 'refs/heads/main' && github.ref != 
+    'refs/heads/develop' && !startsWith(github.ref, 'refs/tags/')) }}
 
 jobs:
   asan:
     name: address sanitizer
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push')
+      && needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ${{ matrix.os }}
     # Guardrail (CoolProp-xuu).  Without this the job inherits GitHub's 6-hour
     # default cap; when a test runs away the job is silently reported as
@@ -69,28 +72,30 @@ jobs:
         os: [ubuntu-latest]
         python-version: [3.13]
     steps:
-      - name: checkout
-        uses: actions/checkout@v7
-      - name: Build REFPROP
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        shell: bash
-        run: |
-          set -x
-          cd .github/workflows
-          chmod +x buildREFPROP.sh
-          ./buildREFPROP.sh
-          echo COOLPROP_REFPROP_ROOT=`pwd`/gpgREFPROP/REFPROP-cmake/bld >> $GITHUB_ENV
-        env:
-          REFPROP_GPG_PASSPHRASE: ${{ secrets.REFPROP_GPG_PASSPHRASE }}
-      - name: mkdir
-        run: mkdir build && cd build
-      - name: cmake config
-        run: cd build && CXX=clang++ cmake .. -DCMAKE_BUILD_TYPE=Asan -DCOOLPROP_ASAN=ON -DCOOLPROP_CATCH_MODULE=ON
-      - name: build all Catch tests
+    - name: checkout
+      uses: actions/checkout@v7
+    - name: Build REFPROP
+      if: github.event_name != 'pull_request' || 
+        github.event.pull_request.head.repo.full_name == github.repository
+      shell: bash
+      run: |
+        set -x
+        cd .github/workflows
+        chmod +x buildREFPROP.sh
+        ./buildREFPROP.sh
+        echo COOLPROP_REFPROP_ROOT=`pwd`/gpgREFPROP/REFPROP-cmake/bld >> $GITHUB_ENV
+      env:
+        REFPROP_GPG_PASSPHRASE: ${{ secrets.REFPROP_GPG_PASSPHRASE }}
+    - name: mkdir
+      run: mkdir build && cd build
+    - name: cmake config
+      run: cd build && CXX=clang++ cmake .. -DCMAKE_BUILD_TYPE=Asan 
+        -DCOOLPROP_ASAN=ON -DCOOLPROP_CATCH_MODULE=ON
+    - name: build all Catch tests
         # -j$(nproc): every other build job already parallelises; the ASan job
         # historically did not, leaving the compile serial on the multi-vCPU runner.
-        run: cmake --build build --config Asan -j$(nproc)
-      - name: run all the compiled Catch tests with address sanitizer
+      run: cmake --build build --config Asan -j$(nproc)
+    - name: run all the compiled Catch tests with address sanitizer
         # detect_stack_use_after_return is deliberately NOT enabled here
         # (CoolProp-xuu).  With REFPROP present — which CI builds — the 6
         # SVDSBTL&REFPROP [source] tests build large BDCSVD surfaces, and
@@ -196,255 +201,263 @@ jobs:
         # cancel_merged_pr_runs.yml -- the exact ambiguity this job's cap was
         # added to remove (CoolProp-xuu).  Bounding the test step instead makes
         # an overrun a real step failure with a message that says so.
-        run: |
-          cd build
-          budget=4200  # 70 min; with the 60 s --kill-after grace that is 71 min worst case, leaving ~19 min of the 90 min cap for REFPROP + compile (9.9 min measured)
-          set +e
-          timeout --signal=INT --kill-after=60 "$budget" \
-            env ASAN_OPTIONS=detect_odr_violation=1 \
-                ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-18 \
-                ./CatchTestRunner "~[slow]" --benchmark-samples 1
-          rc=$?
-          set -e
-          if [ "$rc" -eq 124 ]; then
-            echo "::error title=ASan run exceeded its budget::The ASan test run did not finish within ${budget}s. This is a *timeout*, not a memory error and not a cancellation -- see the SCOPE/TIMEOUT notes in dev_checks.yml and dev/ci/README.md before raising the budget."
-          elif [ "$rc" -eq 137 ]; then
-            # 137 == 128+SIGKILL.  That is what `timeout --kill-after` sends
-            # when SIGINT was ignored, but it is also what the OOM killer
-            # sends -- and ASan roughly doubles the memory footprint, so OOM
-            # is a live possibility on a 2-vCPU runner.  Do not assert which.
-            echo "::error title=ASan run was killed (SIGKILL)::Either the ${budget}s budget elapsed and SIGINT was ignored, or the kernel OOM-killed it (ASan ~2x memory). Check the log for an ASan OOM report and the runner's memory before assuming a timeout."
-          fi
-          exit $rc
+      run: |
+        cd build
+        budget=4200  # 70 min; with the 60 s --kill-after grace that is 71 min worst case, leaving ~19 min of the 90 min cap for REFPROP + compile (9.9 min measured)
+        set +e
+        timeout --signal=INT --kill-after=60 "$budget" \
+          env ASAN_OPTIONS=detect_odr_violation=1 \
+              ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-18 \
+              ./CatchTestRunner "~[slow]" --benchmark-samples 1
+        rc=$?
+        set -e
+        if [ "$rc" -eq 124 ]; then
+          echo "::error title=ASan run exceeded its budget::The ASan test run did not finish within ${budget}s. This is a *timeout*, not a memory error and not a cancellation -- see the SCOPE/TIMEOUT notes in dev_checks.yml and dev/ci/README.md before raising the budget."
+        elif [ "$rc" -eq 137 ]; then
+          # 137 == 128+SIGKILL.  That is what `timeout --kill-after` sends
+          # when SIGINT was ignored, but it is also what the OOM killer
+          # sends -- and ASan roughly doubles the memory footprint, so OOM
+          # is a live possibility on a 2-vCPU runner.  Do not assert which.
+          echo "::error title=ASan run was killed (SIGKILL)::Either the ${budget}s budget elapsed and SIGINT was ignored, or the kernel OOM-killed it (ASan ~2x memory). Check the log for an ASan OOM report and the runner's memory before assuming a timeout."
+        fi
+        exit $rc
 
+    needs:
+    - alpha_bridge_inputs
   clang-format:
     name: clang-format (PR diff)
     # PR-only — push triggers were retired (CoolProp-2uw.1) because master kept
     # going red retroactively after every merge that introduced a violation.
     # If you need to test the workflow on a branch, open a draft PR.
-    if: github.event_name == 'pull_request'
+    if: ${{ (github.event_name == 'pull_request') && 
+      needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0   # Fetch all history (especially branches)
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0     # Fetch all history (especially branches)
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
 
-      - name: Run clang-format against C++ files touched by the PR
-        shell: bash
-        run: |
-            echo "GITHUB_REF=$GITHUB_REF GITHUB_BASE_REF=$GITHUB_BASE_REF GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
-            # Pin clang-format to the version declared in .pre-commit-config.yaml
-            # so CI and the local pre-commit hook always run the same binary.
-            VER=$(awk '/mirrors-clang-format/{f=1} f && /^[[:space:]]*rev:/{print $2; exit}' .pre-commit-config.yaml | tr -d 'v"')
-            export CLANG_FORMAT="uvx clang-format@$VER"
-            $CLANG_FORMAT --version
-            # Use SHAs directly so this works for both fork PRs and local-branch PRs.
-            # remotes/origin/<branch> is unreliable for fork PRs because the fork's
-            # branch is not fetched into origin.
-            #
-            # HEAD must be pull_request.head.sha (the actual PR tip), NOT github.sha
-            # (the synthetic refs/pull/N/merge commit). Using the merge SHA causes
-            # `git diff base..merge` to include every change master made after the
-            # PR was opened — so any file master modified gets flagged on every
-            # downstream PR even when the PR did not touch it.
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-            echo "Comparing HEAD $HEAD_SHA against base $BASE_SHA"
-            ./dev/ci/clang-format.sh "$HEAD_SHA" "$BASE_SHA"
+    - name: Run clang-format against C++ files touched by the PR
+      shell: bash
+      run: |
+        echo "GITHUB_REF=$GITHUB_REF GITHUB_BASE_REF=$GITHUB_BASE_REF GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
+        # Pin clang-format to the version declared in .pre-commit-config.yaml
+        # so CI and the local pre-commit hook always run the same binary.
+        VER=$(awk '/mirrors-clang-format/{f=1} f && /^[[:space:]]*rev:/{print $2; exit}' .pre-commit-config.yaml | tr -d 'v"')
+        export CLANG_FORMAT="uvx clang-format@$VER"
+        $CLANG_FORMAT --version
+        # Use SHAs directly so this works for both fork PRs and local-branch PRs.
+        # remotes/origin/<branch> is unreliable for fork PRs because the fork's
+        # branch is not fetched into origin.
+        #
+        # HEAD must be pull_request.head.sha (the actual PR tip), NOT github.sha
+        # (the synthetic refs/pull/N/merge commit). Using the merge SHA causes
+        # `git diff base..merge` to include every change master made after the
+        # PR was opened — so any file master modified gets flagged on every
+        # downstream PR even when the PR did not touch it.
+        BASE_SHA="${{ github.event.pull_request.base.sha }}"
+        HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+        echo "Comparing HEAD $HEAD_SHA against base $BASE_SHA"
+        ./dev/ci/clang-format.sh "$HEAD_SHA" "$BASE_SHA"
 
-      - name: Upload clang-format patch as artifact
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@v7
-        with:
-            name: CoolProp-${{ github.sha }}-clang_format.patch
-            path: clang_format.patch
+    - name: Upload clang-format patch as artifact
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: CoolProp-${{ github.sha }}-clang_format.patch
+        path: clang_format.patch
 
+    needs:
+    - alpha_bridge_inputs
   nanobind-wheels:
     name: nanobind wheels (build the publish matrix, test 3.9-3.14)
     # PR-only (same rationale as clang-format above): avoid master going red
     # retroactively. Open a draft PR to exercise it on a branch.
-    if: github.event_name == 'pull_request'
+    if: ${{ (github.event_name == 'pull_request') && 
+      needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
 
-      - name: Build the nanobind wheel matrix (3.9-3.11 per-version + cp312-abi3)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Mirror the published v8 matrix (bd CoolProp-r9sq.6): per-version wheels
-          # for 3.9-3.11 (below nanobind's stable-ABI floor) and ONE cp312-abi3
-          # wheel for 3.12+. COOLPROP_NANOBIND=ON drives both the nanobind CMake
-          # build and (on Py>=3.12) the abi3 wheel tag via the pyproject overrides.
-          # Release: the wheel compiles the whole core (incl. SVDSBTL); Debug is slow.
-          for PY in 3.9 3.10 3.11 3.12; do
-            echo "::group::build nanobind wheel on Python $PY"
-            uv venv --python "$PY" ".venv-build-$PY"
-            source ".venv-build-$PY/bin/activate"
-            # Pin nanobind: the cp312 wheel below regenerates the committed type
-            # stub (REGEN_STUB), and the drift gate diffs it byte-for-byte, so the
-            # stubgen toolchain must be reproducible.  Bump deliberately together
-            # with wrappers/Python/_nanobind/CoolProp.pyi (bd CoolProp-1gas).
-            uv pip install "nanobind==2.12.0" cython scikit-build-core ninja
-            # Only the native cp312-abi3 build regenerates the stub (stubgen imports
-            # the just-built CoolProp.abi3.so -- safe natively, impossible when
-            # cross-compiling). The published wheels never set this; they ship the
-            # committed copy.  Here it lets the drift gate compare against fresh output.
-            regen=""
-            if [ "$PY" = "3.12" ]; then
-              regen="--config-setting=cmake.define.COOLPROP_NANOBIND_REGEN_STUB=ON"
-            fi
-            COOLPROP_NANOBIND=ON uv build --wheel --no-build-isolation \
-              --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
-              $regen \
-              --out-dir dist .
-            deactivate
-            echo "::endgroup::"
-          done
-          ls -l dist/
-          # Hard-gate EVERY expected wheel (under `set -e` a missing/mis-tagged one
-          # fails the step): the per-version wheels for 3.9-3.11 AND the cp312-abi3
-          # wheel. Without this, a per-version tagging regression would only warn in
-          # the test step below (whose final guard is just `ran > 0`).
-          for tag in cp39 cp310 cp311; do
-            ls dist/coolprop-*-"${tag}"-"${tag}"-*.whl >/dev/null
-          done
-          ls dist/coolprop-*-cp312-abi3-*.whl >/dev/null
-
-      - name: Drift gate — committed nanobind stub matches stubgen output
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The cp312 leg above built with COOLPROP_NANOBIND_REGEN_STUB=ON, so its
-          # wheel carries a FRESHLY regenerated CoolProp.pyi (stubgen run against the
-          # just-built native .so). It must match the committed copy that every
-          # OTHER (incl. cross-compiled) wheel ships verbatim; a diff means a binding
-          # changed without regenerating the stub (bd CoolProp-1gas).
-          WHL=$(ls dist/coolprop-*-cp312-abi3-*.whl)
-          rm -rf _stubcheck && mkdir _stubcheck
-          unzip -q -o "$WHL" -d _stubcheck "CoolProp/CoolProp.pyi" "CoolProp/py.typed"
-          ok=1
-          diff -u wrappers/Python/_nanobind/CoolProp.pyi _stubcheck/CoolProp/CoolProp.pyi || ok=0
-          diff -u wrappers/Python/_nanobind/py.typed     _stubcheck/CoolProp/py.typed     || ok=0
-          if [ "$ok" -ne 1 ]; then
-            # The unified diff above shows exactly what drifted. Emit a copy-paste
-            # regen recipe (matches wrappers/Python/_nanobind/README.md), then fail
-            # with a single concise annotation.
-            {
-              echo
-              echo "Committed nanobind stub is out of sync with stubgen output."
-              echo "Regenerate it from a NATIVE abi3 build and commit the result:"
-              echo
-              echo "  uv pip install 'nanobind==2.12.0' cython scikit-build-core ninja"
-              echo "  COOLPROP_NANOBIND=ON uv build --wheel --no-build-isolation \\"
-              echo "    --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \\"
-              echo "    --config-setting=cmake.define.COOLPROP_NANOBIND_REGEN_STUB=ON \\"
-              echo "    --out-dir dist ."
-              echo "  unzip -o -j dist/coolprop-*-cp312-abi3-*.whl \\"
-              echo "    CoolProp/CoolProp.pyi CoolProp/py.typed -d wrappers/Python/_nanobind/"
-              echo
-              echo "(nanobind must be PINNED to the gate's version for a byte-exact match;"
-              echo " see wrappers/Python/_nanobind/README.md.)"
-              echo
-            } >&2
-            echo "::error::Committed nanobind stub is stale — see the regen recipe in the log above."
-            exit 1
+    - name: Build the nanobind wheel matrix (3.9-3.11 per-version + cp312-abi3)
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Mirror the published v8 matrix (bd CoolProp-r9sq.6): per-version wheels
+        # for 3.9-3.11 (below nanobind's stable-ABI floor) and ONE cp312-abi3
+        # wheel for 3.12+. COOLPROP_NANOBIND=ON drives both the nanobind CMake
+        # build and (on Py>=3.12) the abi3 wheel tag via the pyproject overrides.
+        # Release: the wheel compiles the whole core (incl. SVDSBTL); Debug is slow.
+        for PY in 3.9 3.10 3.11 3.12; do
+          echo "::group::build nanobind wheel on Python $PY"
+          uv venv --python "$PY" ".venv-build-$PY"
+          source ".venv-build-$PY/bin/activate"
+          # Pin nanobind: the cp312 wheel below regenerates the committed type
+          # stub (REGEN_STUB), and the drift gate diffs it byte-for-byte, so the
+          # stubgen toolchain must be reproducible.  Bump deliberately together
+          # with wrappers/Python/_nanobind/CoolProp.pyi (bd CoolProp-1gas).
+          uv pip install "nanobind==2.12.0" cython scikit-build-core ninja
+          # Only the native cp312-abi3 build regenerates the stub (stubgen imports
+          # the just-built CoolProp.abi3.so -- safe natively, impossible when
+          # cross-compiling). The published wheels never set this; they ship the
+          # committed copy.  Here it lets the drift gate compare against fresh output.
+          regen=""
+          if [ "$PY" = "3.12" ]; then
+            regen="--config-setting=cmake.define.COOLPROP_NANOBIND_REGEN_STUB=ON"
           fi
-          echo "Committed nanobind stub is in sync."
-
-      - name: Run the pytest suite on 3.9-3.14 against the matching wheel
-        shell: bash
-        run: |
-          set -euo pipefail
-          # 3.9-3.11 use their own per-version wheel; 3.12/3.13/3.14 all install the
-          # single cp312-abi3 wheel (the crux of abi3 -- it must work on each).
-          ran=0
-          ran_abi3=0   # legs that ran the cp312-abi3 wheel (3.12/3.13/3.14)
-          ran_mpl=0    # legs where matplotlib installed, i.e. the Plots suite ran
-          for PY in 3.9 3.10 3.11 3.12 3.13 3.14; do
-            is_abi3=0
-            case "$PY" in
-              3.9 | 3.10 | 3.11)
-                tag="cp${PY/./}"
-                WHL=$(ls dist/coolprop-*-"${tag}"-"${tag}"-*.whl 2>/dev/null || true)
-                ;;
-              *)
-                WHL=$(ls dist/coolprop-*-cp312-abi3-*.whl 2>/dev/null || true)
-                is_abi3=1
-                ;;
-            esac
-            if [ -z "$WHL" ]; then
-              echo "::warning::no nanobind wheel found for Python $PY"
-              continue
-            fi
-            echo "::group::pytest on Python $PY ($(basename "$WHL"))"
-            uv venv --python "$PY" ".venv-$PY"
-            source ".venv-$PY/bin/activate"
-            # Install the TEST DEPS first: a brand-new interpreter may transiently
-            # lack pytest/numpy cp wheels (a toolchain gap, not a regression) -- warn
-            # and skip that leg. But the CoolProp wheel ITSELF failing to install is a
-            # real defect, so install it SEPARATELY (below) under `set -e` -- a broken
-            # or mis-built wheel must fail the job, not warn-and-skip (CoolProp-1tbe.12).
-            if ! uv pip install pytest numpy; then
-              echo "::warning::test deps (pytest/numpy) unavailable on Python $PY; skipping this leg"
-              deactivate; echo "::endgroup::"; continue
-            fi
-            uv pip install "$WHL"   # broken/incompatible wheel -> hard fail via set -e
-            uv pip install mypy || echo "::warning::mypy unavailable on $PY; test_stub mypy check will skip"
-            # CoolProp.Plots imports matplotlib at module scope, so without it
-            # the whole Plots suite (test_derivatives_plots, test_isoline_tracer)
-            # silently importorskips (CoolProp-dgxi).  Per-leg this is a warning,
-            # because a brand-new interpreter can genuinely lack a matplotlib
-            # wheel -- but if it is missing on EVERY leg the suite reverts to
-            # zero coverage and the job would still be green, which is the exact
-            # condition this install exists to remove.  Counted and asserted
-            # below, the same way the abi3 wheel is.
-            if uv pip install matplotlib; then
-              ran_mpl=$((ran_mpl + 1))
-            else
-              echo "::warning::matplotlib unavailable on $PY; Plots tests will skip on this leg"
-            fi
-            python -c "import sys; print('Python', sys.version.split()[0])"
-            pytest wrappers/Python/pytest -q
-            ran=$((ran + 1))
-            if [ "$is_abi3" -eq 1 ]; then ran_abi3=$((ran_abi3 + 1)); fi
-            deactivate
-            echo "::endgroup::"
-          done
-          test "$ran" -gt 0 || { echo "::error::no Python interpreter could run a nanobind wheel"; exit 1; }
-          # The cp312-abi3 wheel is the v8 crux (one wheel for 3.12/3.13/3.14); it must
-          # actually be exercised on at least one of them, else a broken abi3 wheel
-          # could green the job on the 3.9-3.11 per-version legs alone (CoolProp-1tbe.12).
-          test "$ran_abi3" -gt 0 || { echo "::error::the cp312-abi3 wheel ran on NO interpreter (3.12/3.13/3.14) -- it is the v8 crux and must be tested"; exit 1; }
-          test "$ran_mpl" -gt 0 || { echo "::error::matplotlib installed on NO interpreter -- the whole Plots suite importorskipped and this job proves nothing about it"; exit 1; }
-
-      - name: PDSim cimport contract (compile + run against the abi3 wheel)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # PDSim consumes CoolProp's cdef State / AbstractState / constants
-          # surface via `cimport` (dev/pdsim_cimport_contract/SURFACE.md), incl.
-          # `from CoolProp.CoolProp cimport State`.  Compile + run the frozen
-          # contract against the installed v8 wheel so a drift in that surface
-          # fails CI here rather than silently breaking PDSim's next build
-          # (CoolProp-1tbe.6).  Fail-closed: a missing wheel is a hard error.
-          WHL=$(ls dist/coolprop-*-cp312-abi3-*.whl 2>/dev/null || true)
-          if [ -z "$WHL" ]; then
-            echo "::error::no cp312-abi3 wheel found for the PDSim cimport contract"
-            exit 1
-          fi
-          uv venv --python 3.12 .venv-pdsim
-          source .venv-pdsim/bin/activate
-          uv pip install "cython>=3.1" setuptools numpy "$WHL"
-          python dev/pdsim_cimport_contract/run_contract.py
+          COOLPROP_NANOBIND=ON uv build --wheel --no-build-isolation \
+            --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \
+            $regen \
+            --out-dir dist .
           deactivate
+          echo "::endgroup::"
+        done
+        ls -l dist/
+        # Hard-gate EVERY expected wheel (under `set -e` a missing/mis-tagged one
+        # fails the step): the per-version wheels for 3.9-3.11 AND the cp312-abi3
+        # wheel. Without this, a per-version tagging regression would only warn in
+        # the test step below (whose final guard is just `ran > 0`).
+        for tag in cp39 cp310 cp311; do
+          ls dist/coolprop-*-"${tag}"-"${tag}"-*.whl >/dev/null
+        done
+        ls dist/coolprop-*-cp312-abi3-*.whl >/dev/null
 
+    - name: Drift gate — committed nanobind stub matches stubgen output
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The cp312 leg above built with COOLPROP_NANOBIND_REGEN_STUB=ON, so its
+        # wheel carries a FRESHLY regenerated CoolProp.pyi (stubgen run against the
+        # just-built native .so). It must match the committed copy that every
+        # OTHER (incl. cross-compiled) wheel ships verbatim; a diff means a binding
+        # changed without regenerating the stub (bd CoolProp-1gas).
+        WHL=$(ls dist/coolprop-*-cp312-abi3-*.whl)
+        rm -rf _stubcheck && mkdir _stubcheck
+        unzip -q -o "$WHL" -d _stubcheck "CoolProp/CoolProp.pyi" "CoolProp/py.typed"
+        ok=1
+        diff -u wrappers/Python/_nanobind/CoolProp.pyi _stubcheck/CoolProp/CoolProp.pyi || ok=0
+        diff -u wrappers/Python/_nanobind/py.typed     _stubcheck/CoolProp/py.typed     || ok=0
+        if [ "$ok" -ne 1 ]; then
+          # The unified diff above shows exactly what drifted. Emit a copy-paste
+          # regen recipe (matches wrappers/Python/_nanobind/README.md), then fail
+          # with a single concise annotation.
+          {
+            echo
+            echo "Committed nanobind stub is out of sync with stubgen output."
+            echo "Regenerate it from a NATIVE abi3 build and commit the result:"
+            echo
+            echo "  uv pip install 'nanobind==2.12.0' cython scikit-build-core ninja"
+            echo "  COOLPROP_NANOBIND=ON uv build --wheel --no-build-isolation \\"
+            echo "    --config-setting=cmake.define.CMAKE_BUILD_TYPE=Release \\"
+            echo "    --config-setting=cmake.define.COOLPROP_NANOBIND_REGEN_STUB=ON \\"
+            echo "    --out-dir dist ."
+            echo "  unzip -o -j dist/coolprop-*-cp312-abi3-*.whl \\"
+            echo "    CoolProp/CoolProp.pyi CoolProp/py.typed -d wrappers/Python/_nanobind/"
+            echo
+            echo "(nanobind must be PINNED to the gate's version for a byte-exact match;"
+            echo " see wrappers/Python/_nanobind/README.md.)"
+            echo
+          } >&2
+          echo "::error::Committed nanobind stub is stale — see the regen recipe in the log above."
+          exit 1
+        fi
+        echo "Committed nanobind stub is in sync."
+
+    - name: Run the pytest suite on 3.9-3.14 against the matching wheel
+      shell: bash
+      run: |
+        set -euo pipefail
+        # 3.9-3.11 use their own per-version wheel; 3.12/3.13/3.14 all install the
+        # single cp312-abi3 wheel (the crux of abi3 -- it must work on each).
+        ran=0
+        ran_abi3=0   # legs that ran the cp312-abi3 wheel (3.12/3.13/3.14)
+        ran_mpl=0    # legs where matplotlib installed, i.e. the Plots suite ran
+        for PY in 3.9 3.10 3.11 3.12 3.13 3.14; do
+          is_abi3=0
+          case "$PY" in
+            3.9 | 3.10 | 3.11)
+              tag="cp${PY/./}"
+              WHL=$(ls dist/coolprop-*-"${tag}"-"${tag}"-*.whl 2>/dev/null || true)
+              ;;
+            *)
+              WHL=$(ls dist/coolprop-*-cp312-abi3-*.whl 2>/dev/null || true)
+              is_abi3=1
+              ;;
+          esac
+          if [ -z "$WHL" ]; then
+            echo "::warning::no nanobind wheel found for Python $PY"
+            continue
+          fi
+          echo "::group::pytest on Python $PY ($(basename "$WHL"))"
+          uv venv --python "$PY" ".venv-$PY"
+          source ".venv-$PY/bin/activate"
+          # Install the TEST DEPS first: a brand-new interpreter may transiently
+          # lack pytest/numpy cp wheels (a toolchain gap, not a regression) -- warn
+          # and skip that leg. But the CoolProp wheel ITSELF failing to install is a
+          # real defect, so install it SEPARATELY (below) under `set -e` -- a broken
+          # or mis-built wheel must fail the job, not warn-and-skip (CoolProp-1tbe.12).
+          if ! uv pip install pytest numpy; then
+            echo "::warning::test deps (pytest/numpy) unavailable on Python $PY; skipping this leg"
+            deactivate; echo "::endgroup::"; continue
+          fi
+          uv pip install "$WHL"   # broken/incompatible wheel -> hard fail via set -e
+          uv pip install mypy || echo "::warning::mypy unavailable on $PY; test_stub mypy check will skip"
+          # CoolProp.Plots imports matplotlib at module scope, so without it
+          # the whole Plots suite (test_derivatives_plots, test_isoline_tracer)
+          # silently importorskips (CoolProp-dgxi).  Per-leg this is a warning,
+          # because a brand-new interpreter can genuinely lack a matplotlib
+          # wheel -- but if it is missing on EVERY leg the suite reverts to
+          # zero coverage and the job would still be green, which is the exact
+          # condition this install exists to remove.  Counted and asserted
+          # below, the same way the abi3 wheel is.
+          if uv pip install matplotlib; then
+            ran_mpl=$((ran_mpl + 1))
+          else
+            echo "::warning::matplotlib unavailable on $PY; Plots tests will skip on this leg"
+          fi
+          python -c "import sys; print('Python', sys.version.split()[0])"
+          pytest wrappers/Python/pytest -q
+          ran=$((ran + 1))
+          if [ "$is_abi3" -eq 1 ]; then ran_abi3=$((ran_abi3 + 1)); fi
+          deactivate
+          echo "::endgroup::"
+        done
+        test "$ran" -gt 0 || { echo "::error::no Python interpreter could run a nanobind wheel"; exit 1; }
+        # The cp312-abi3 wheel is the v8 crux (one wheel for 3.12/3.13/3.14); it must
+        # actually be exercised on at least one of them, else a broken abi3 wheel
+        # could green the job on the 3.9-3.11 per-version legs alone (CoolProp-1tbe.12).
+        test "$ran_abi3" -gt 0 || { echo "::error::the cp312-abi3 wheel ran on NO interpreter (3.12/3.13/3.14) -- it is the v8 crux and must be tested"; exit 1; }
+        test "$ran_mpl" -gt 0 || { echo "::error::matplotlib installed on NO interpreter -- the whole Plots suite importorskipped and this job proves nothing about it"; exit 1; }
+
+    - name: PDSim cimport contract (compile + run against the abi3 wheel)
+      shell: bash
+      run: |
+        set -euo pipefail
+        # PDSim consumes CoolProp's cdef State / AbstractState / constants
+        # surface via `cimport` (dev/pdsim_cimport_contract/SURFACE.md), incl.
+        # `from CoolProp.CoolProp cimport State`.  Compile + run the frozen
+        # contract against the installed v8 wheel so a drift in that surface
+        # fails CI here rather than silently breaking PDSim's next build
+        # (CoolProp-1tbe.6).  Fail-closed: a missing wheel is a hard error.
+        WHL=$(ls dist/coolprop-*-cp312-abi3-*.whl 2>/dev/null || true)
+        if [ -z "$WHL" ]; then
+          echo "::error::no cp312-abi3 wheel found for the PDSim cimport contract"
+          exit 1
+        fi
+        uv venv --python 3.12 .venv-pdsim
+        source .venv-pdsim/bin/activate
+        uv pip install "cython>=3.1" setuptools numpy "$WHL"
+        python dev/pdsim_cimport_contract/run_contract.py
+        deactivate
+
+    needs:
+    - alpha_bridge_inputs
   clang-tidy:
     name: clang-tidy (diff-only, informational)
     # Runs clang-tidy on lines changed in the PR via clang-tidy-diff.py and
@@ -459,98 +472,103 @@ jobs:
     # Both the `continue-on-error` on the run step and `if: always()` on the
     # upload are load-bearing: they keep this workflow informational across
     # every code path.
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 
+      'workflow_dispatch') && needs.alpha_bridge_inputs.outputs.changed == 
+      'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0   # full history for git diff against base
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0     # full history for git diff against base
 
-      - name: Install clang-tidy-18 + ninja
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy-18 ninja-build
-          sudo update-alternatives --install \
-            /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
-          clang-tidy --version
+    - name: Install clang-tidy-18 + ninja
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-tidy-18 ninja-build
+        sudo update-alternatives --install \
+          /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
+        clang-tidy --version
 
-      - name: Cache CPM packages
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.cpm_cache
-          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
-          restore-keys: |
-            cpm-${{ runner.os }}-
+    - name: Cache CPM packages
+      uses: actions/cache@v6
+      with:
+        path: ${{ github.workspace }}/.cpm_cache
+        key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
+        restore-keys: |
+          cpm-${{ runner.os }}-
 
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: dev-checks-clang-tidy
+    - name: Set up ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: dev-checks-clang-tidy
 
-      - name: Configure
-        run: |
-          cmake -G Ninja \
-            -DCOOLPROP_MY_MAIN=dev/ci/main.cpp \
-            -DCOOLPROP_STATIC_LIBRARY=ON \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -B ${{ github.workspace }}/build \
-            -S .
+    - name: Configure
+      run: |
+        cmake -G Ninja \
+          -DCOOLPROP_MY_MAIN=dev/ci/main.cpp \
+          -DCOOLPROP_STATIC_LIBRARY=ON \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -B ${{ github.workspace }}/build \
+          -S .
 
-      - name: Generate auto-generated headers
+    - name: Generate auto-generated headers
         # The all_*_JSON.h headers are generated at build time from
         # dev/fluids/. clang-tidy needs them on disk to parse src/ files.
-        run: cmake --build ${{ github.workspace }}/build --target generate_headers
+      run: cmake --build ${{ github.workspace }}/build --target generate_headers
 
-      - name: Locate clang-tidy-diff.py
-        id: diff_script
-        run: |
-          path=$(find /usr -name 'clang-tidy-diff*.py' 2>/dev/null | head -1)
-          if [ -z "$path" ]; then
-            echo "clang-tidy-diff.py not found via apt; falling back to upstream raw"
-            curl -sSL -o /tmp/clang-tidy-diff.py \
-              https://raw.githubusercontent.com/llvm/llvm-project/release/18.x/clang-tools-extra/clang-tidy/tool/clang-tidy-diff.py
-            path=/tmp/clang-tidy-diff.py
-          fi
-          echo "path=$path" >> "$GITHUB_OUTPUT"
-          echo "Using: $path"
+    - name: Locate clang-tidy-diff.py
+      id: diff_script
+      run: |
+        path=$(find /usr -name 'clang-tidy-diff*.py' 2>/dev/null | head -1)
+        if [ -z "$path" ]; then
+          echo "clang-tidy-diff.py not found via apt; falling back to upstream raw"
+          curl -sSL -o /tmp/clang-tidy-diff.py \
+            https://raw.githubusercontent.com/llvm/llvm-project/release/18.x/clang-tools-extra/clang-tidy/tool/clang-tidy-diff.py
+          path=/tmp/clang-tidy-diff.py
+        fi
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "Using: $path"
 
-      - name: Run clang-tidy-diff on PR-touched lines
-        continue-on-error: true   # informational by design — see top-of-job
-        shell: bash
-        run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.sha }}"
-          echo "Comparing $HEAD_SHA against $BASE_SHA"
-          # Negative pathspecs skip vendored / auto-generated files. Anything
-          # that lives outside src/ + include/ won't have a compile_commands
-          # entry anyway and would just produce errors.
-          git diff -U0 "$BASE_SHA" "$HEAD_SHA" -- \
-            ':!externals/' \
-            ':!include/*_JSON*.h' \
-            ':!include/gitrevision.h' \
-            ':!include/miniz.h' \
-            | python3 ${{ steps.diff_script.outputs.path }} \
-                -p1 \
-                -path ${{ github.workspace }}/build \
-                -regex '.*\.(c|cpp|h|hpp)$' \
-                -j$(nproc) \
-                2>&1 | tee clang-tidy-diff.log
-          echo "clang-tidy-diff.log size: $(wc -l < clang-tidy-diff.log) lines"
+    - name: Run clang-tidy-diff on PR-touched lines
+      continue-on-error: true     # informational by design — see top-of-job
+      shell: bash
+      run: |
+        BASE_SHA="${{ github.event.pull_request.base.sha }}"
+        HEAD_SHA="${{ github.sha }}"
+        echo "Comparing $HEAD_SHA against $BASE_SHA"
+        # Negative pathspecs skip vendored / auto-generated files. Anything
+        # that lives outside src/ + include/ won't have a compile_commands
+        # entry anyway and would just produce errors.
+        git diff -U0 "$BASE_SHA" "$HEAD_SHA" -- \
+          ':!externals/' \
+          ':!include/*_JSON*.h' \
+          ':!include/gitrevision.h' \
+          ':!include/miniz.h' \
+          | python3 ${{ steps.diff_script.outputs.path }} \
+              -p1 \
+              -path ${{ github.workspace }}/build \
+              -regex '.*\.(c|cpp|h|hpp)$' \
+              -j$(nproc) \
+              2>&1 | tee clang-tidy-diff.log
+        echo "clang-tidy-diff.log size: $(wc -l < clang-tidy-diff.log) lines"
 
-      - name: Upload clang-tidy report as artifact
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: CoolProp-${{ github.sha }}-clang-tidy-diff
-          path: clang-tidy-diff.log
-          if-no-files-found: warn
+    - name: Upload clang-tidy report as artifact
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: CoolProp-${{ github.sha }}-clang-tidy-diff
+        path: clang-tidy-diff.log
+        if-no-files-found: warn
 
+    needs:
+    - alpha_bridge_inputs
   codeql:
     name: CodeQL (${{ matrix.language }})
     # Runs on push to master, every PR, and the twice-weekly cron fallback.
     # Skip the Sunday-only cppcheck/iwyu cron — codeql only wants the Sun+Thu one.
-    if: github.event_name != 'schedule' || github.event.schedule == '15 8 * * 0,4'
+    if: ${{ (github.event_name != 'schedule' || github.event.schedule == '15 8 *
+      * 0,4') && needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -561,24 +579,24 @@ jobs:
       matrix:
         language: [cpp, python]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+    - name: Checkout
+      uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.x'
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: 3.x
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          queries: +security-and-quality
-          config-file: ./.github/codeql/codeql-config.yml
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: ${{ matrix.language }}
+        queries: +security-and-quality
+        config-file: ./.github/codeql/codeql-config.yml
 
-      - name: Autobuild Python
-        if: ${{ matrix.language == 'python' }}
-        uses: github/codeql-action/autobuild@v4
+    - name: Autobuild Python
+      if: ${{ matrix.language == 'python' }}
+      uses: github/codeql-action/autobuild@v4
 
       # CPM (cmake/dependencies.cmake) fetches Eigen/msgpack-c/nlohmann_json/
       # valijson/IF97/etc. from network on every configure with no cache, so
@@ -586,14 +604,14 @@ jobs:
       # re-downloads the same dependency set. Persisting CPM's source cache
       # (same path CPMAddPackage defaults to: <repo>/.cpm_cache) turns repeat
       # runs into cache hits. cpp-only: the python leg never touches CMake.
-      - name: Cache CPM packages
-        if: ${{ matrix.language == 'cpp' }}
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.cpm_cache
-          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
-          restore-keys: |
-            cpm-${{ runner.os }}-
+    - name: Cache CPM packages
+      if: ${{ matrix.language == 'cpp' }}
+      uses: actions/cache@v6
+      with:
+        path: ${{ github.workspace }}/.cpm_cache
+        key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
+        restore-keys: |
+          cpm-${{ runner.os }}-
 
       # NOTE: deliberately NOT using ccache here (unlike the other dev_checks
       # jobs). CodeQL's C++ extractor traces actual compiler invocations to
@@ -608,75 +626,77 @@ jobs:
       # omitting a launcher flag no longer keeps it out: the protection would
       # rest on ccache being absent from the runner image's PATH, and would
       # break silently the day that changes. Opt out explicitly instead.
-      - name: Configure CPP
-        if: ${{ matrix.language == 'cpp' }}
-        run: cmake
-               -DCOOLPROP_MY_MAIN=dev/ci/main.cpp
-               -DCOOLPROP_USE_CCACHE=OFF
-               -B ${{github.workspace}}/build
-               -S .
+    - name: Configure CPP
+      if: ${{ matrix.language == 'cpp' }}
+      run: cmake -DCOOLPROP_MY_MAIN=dev/ci/main.cpp -DCOOLPROP_USE_CCACHE=OFF -B
+        ${{github.workspace}}/build -S .
 
-      - name: Build CPP
-        if: ${{ matrix.language == 'cpp' }}
-        run: cmake
-               --build ${{github.workspace}}/build
-               --config Release
+    - name: Build CPP
+      if: ${{ matrix.language == 'cpp' }}
+      run: cmake --build ${{github.workspace}}/build --config Release
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:${{ matrix.language }}"
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: /language:${{ matrix.language }}
 
+    needs:
+    - alpha_bridge_inputs
   cppcheck:
     name: cppcheck (informational)
     # Warning-only — cppcheck output drives an artifact + summary, never fails
     # the PR. cppcheck is high-noise on a 937KLOC mature codebase, so we keep
     # it advisory while we work down the queue.
     # Triggers: PR + workflow_dispatch + Sunday cron (skip Thursday codeql cron).
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '15 8 * * 0')
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 
+      'workflow_dispatch' || (github.event_name == 'schedule' && 
+      github.event.schedule == '15 8 * * 0')) && 
+      needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Install cppcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cppcheck
-          cppcheck --version
+    - name: Install cppcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cppcheck
+        cppcheck --version
 
-      - name: Run cppcheck
-        shell: bash
-        continue-on-error: true
-        run: |
-          cppcheck \
-            --std=c++17 \
-            --enable=warning,style,information \
-            --suppress=noExplicitConstructor \
-            --suppress=useStlAlgorithm \
-            --suppress=unmatchedSuppression \
-            --suppress=unusedPrivateFunction \
-            --suppress=functionStatic:src/Backends/Helmholtz/Fluids/FluidLibrary.h \
-            --inline-suppr \
-            --inconclusive \
-            --template='[{file}:{line}]:({severity}),[{id}],{message}' \
-            -j $(nproc) \
-            --force \
-            ./src \
-            3>&1 1>&2 2>&3 | tee cppcheck.txt || true
+    - name: Run cppcheck
+      shell: bash
+      continue-on-error: true
+      run: |
+        cppcheck \
+          --std=c++17 \
+          --enable=warning,style,information \
+          --suppress=noExplicitConstructor \
+          --suppress=useStlAlgorithm \
+          --suppress=unmatchedSuppression \
+          --suppress=unusedPrivateFunction \
+          --suppress=functionStatic:src/Backends/Helmholtz/Fluids/FluidLibrary.h \
+          --inline-suppr \
+          --inconclusive \
+          --template='[{file}:{line}]:({severity}),[{id}],{message}' \
+          -j $(nproc) \
+          --force \
+          ./src \
+          3>&1 1>&2 2>&3 | tee cppcheck.txt || true
 
-      - name: Parse and colorize cppcheck
-        if: ${{ always() }}
-        continue-on-error: true
-        shell: bash
-        run: python ./dev/ci/colorize_cppcheck_results.py
+    - name: Parse and colorize cppcheck
+      if: ${{ always() }}
+      continue-on-error: true
+      shell: bash
+      run: python ./dev/ci/colorize_cppcheck_results.py
 
-      - name: Upload cppcheck results as artifact
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: CoolProp-${{ github.sha }}-cppcheck_results.txt
-          path: cppcheck.txt
+    - name: Upload cppcheck results as artifact
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: CoolProp-${{ github.sha }}-cppcheck_results.txt
+        path: cppcheck.txt
 
+    needs:
+    - alpha_bridge_inputs
   iwyu:
     name: include-what-you-use (informational)
     # Warning-only — IWYU is high-noise and its suggestions need per-file
@@ -689,51 +709,54 @@ jobs:
     # enabled, CMake sets CXX_INCLUDE_WHAT_YOU_USE on the Main target and
     # the build output IS the IWYU report.
     # Triggers: push master + PR + workflow_dispatch + Sunday cron.
-    if: github.event_name != 'schedule' || github.event.schedule == '15 8 * * 0'
+    if: ${{ (github.event_name != 'schedule' || github.event.schedule == '15 8 *
+      * 0') && needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Install include-what-you-use
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y iwyu ninja-build
-          include-what-you-use --version || true
+    - name: Install include-what-you-use
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y iwyu ninja-build
+        include-what-you-use --version || true
 
-      - name: Cache CPM packages
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.cpm_cache
-          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
-          restore-keys: |
-            cpm-${{ runner.os }}-
+    - name: Cache CPM packages
+      uses: actions/cache@v6
+      with:
+        path: ${{ github.workspace }}/.cpm_cache
+        key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
+        restore-keys: |
+          cpm-${{ runner.os }}-
 
-      - name: Configure with COOLPROP_IWYU
-        run: |
-          cmake -G Ninja \
-            -DCOOLPROP_IWYU=ON \
-            -DCOOLPROP_MY_MAIN=dev/ci/main.cpp \
-            -B ${{ github.workspace }}/build \
-            -S .
+    - name: Configure with COOLPROP_IWYU
+      run: |
+        cmake -G Ninja \
+          -DCOOLPROP_IWYU=ON \
+          -DCOOLPROP_MY_MAIN=dev/ci/main.cpp \
+          -B ${{ github.workspace }}/build \
+          -S .
 
-      - name: Build (produces IWYU report)
-        continue-on-error: true
-        shell: bash
-        run: |
-          cmake --build ${{ github.workspace }}/build --config Release \
-            2>&1 | tee iwyu.log
-          # IWYU's exit codes don't follow build conventions; protect against
-          # tee swallowing a non-zero pipefail.
-          echo "iwyu.log size: $(wc -l < iwyu.log) lines"
+    - name: Build (produces IWYU report)
+      continue-on-error: true
+      shell: bash
+      run: |
+        cmake --build ${{ github.workspace }}/build --config Release \
+          2>&1 | tee iwyu.log
+        # IWYU's exit codes don't follow build conventions; protect against
+        # tee swallowing a non-zero pipefail.
+        echo "iwyu.log size: $(wc -l < iwyu.log) lines"
 
-      - name: Upload IWYU report as artifact
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: CoolProp-${{ github.sha }}-iwyu
-          path: iwyu.log
-          if-no-files-found: warn
+    - name: Upload IWYU report as artifact
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: CoolProp-${{ github.sha }}-iwyu
+        path: iwyu.log
+        if-no-files-found: warn
 
+    needs:
+    - alpha_bridge_inputs
   type-stubs:
     name: python type stubs (PEP 561)
     # Gates the checked-in Cython type stubs (wrappers/Python/CoolProp/*.pyi).
@@ -747,42 +770,47 @@ jobs:
     # stale (stubgen reads only .pyx/.pxd), so those PRs just pass fast.
     # The runtime symbol-parity test (dev/stubs/test_stub_parity.py) needs a
     # source-built CoolProp and runs in the wheel-build workflow, not here.
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push')
+      && needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
 
       # uv/uvx for the on-demand, version-pinned pyright + mypy runs.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
 
       # 1. Drift gate (exact). Regenerate from the Cython sources with the pinned
       #    generator toolchain (gen_stubs.sh provisions its own venv); any diff
       #    means a .pyx changed without regenerating the .pyi.
-      - name: Drift gate (regenerate + diff)
-        run: |
-          ./dev/stubs/gen_stubs.sh
-          if ! git diff --exit-code -- 'wrappers/Python/CoolProp/*.pyi'; then
-            echo "::error::CoolProp.pyi is out of sync with the Cython sources. Run dev/stubs/gen_stubs.sh and commit the result."
-            exit 1
-          fi
+    - name: Drift gate (regenerate + diff)
+      run: |
+        ./dev/stubs/gen_stubs.sh
+        if ! git diff --exit-code -- 'wrappers/Python/CoolProp/*.pyi'; then
+          echo "::error::CoolProp.pyi is out of sync with the Cython sources. Run dev/stubs/gen_stubs.sh and commit the result."
+          exit 1
+        fi
 
       # 2. Type-correctness (static, pinned). pyright resolves CoolProp from the
       #    source tree (extraPaths) and needs numpy stubs; the smoke file uses
       #    typing.assert_type, so it is checked, not executed.
-      - name: pyright type smoke
-        run: uvx --with numpy pyright@1.1.409 --project dev/stubs/pyrightconfig.smoke.json
+    - name: pyright type smoke
+      run: uvx --with numpy pyright@1.1.409 --project 
+        dev/stubs/pyrightconfig.smoke.json
 
       # 3. Stub validity under mypy. --ignore-missing-imports drops noise from
       #    sibling modules mypy pulls in transitively; the stub must be clean.
-      - name: mypy stub check
-        run: uvx mypy@1.19.1 --ignore-missing-imports wrappers/Python/CoolProp/CoolProp.pyi
+    - name: mypy stub check
+      run: uvx mypy@1.19.1 --ignore-missing-imports 
+        wrappers/Python/CoolProp/CoolProp.pyi
 
+    needs:
+    - alpha_bridge_inputs
   superanc-pin:
     name: superancillary docs reference pin
     # Gates the fastchebpure release pinned by the docs superancillary plots
@@ -801,19 +829,22 @@ jobs:
     # test "Superancillary source_eos_hash matches current EOS at bit level" and
     # dev/scripts/check_superanc_freshness.py. See
     # dev/scripts/check_superanc_release_pin.py.
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push')
+      && needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
 
-      - name: Check pinned fastchebpure release matches current EOS
-        run: python3 dev/scripts/check_superanc_release_pin.py
+    - name: Check pinned fastchebpure release matches current EOS
+      run: python3 dev/scripts/check_superanc_release_pin.py
 
+    needs:
+    - alpha_bridge_inputs
   incomp-json-sanity:
     name: incompressible JSON sanity
     # Guards the committed dev/incompressible_liquids/json/*.json against the
@@ -827,7 +858,8 @@ jobs:
     # Build-free. Like type-stubs and superanc-pin, deliberately NO paths filter
     # so it can be a required check without deadlocking unrelated PRs. Local
     # twin: the `incomp-sanity` check in dev/ci/preflight.sh.
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push')
+      && needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     # Least privilege: this job runs PR-authored test code, and needs nothing
     # beyond reading the tree. Without an explicit block it would inherit the
@@ -835,27 +867,30 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
 
       # Pinned like the other build-free gates here (uvx mypy@1.19.1,
       # uvx pyright@1.1.409): unpinned, a fresh pytest release could turn this
       # required check red on unrelated PRs.
-      - name: Run incompressible JSON sanity checks
+    - name: Run incompressible JSON sanity checks
         # The whole directory, with numpy+scipy: test_data_sanity (grid axis
         # ordering) and test_fitting_regression (golden-master refit) are the two
         # safeguards this area relies on, and both importorskip away without
         # them -- so naming only test_json_sanity.py meant they never ran here.
         # `uvx --with` matches the pyright job above.
-        run: uvx --with numpy --with scipy pytest@9.1.1 dev/incompressible_liquids/ -q --color=no
+      run: uvx --with numpy --with scipy pytest@9.1.1 
+        dev/incompressible_liquids/ -q --color=no
 
+    needs:
+    - alpha_bridge_inputs
   installed-header-gate:
     name: Installed-header hygiene gate
     # Fail if any internal/JSON-pulling header (detail/json.h, or anything
@@ -864,56 +899,134 @@ jobs:
     # (check-json-symbols.sh): the symbol gate catches runtime ABI leaks;
     # this gate catches source-level leaks that would expose nlohmann/valijson
     # to downstream consumers at compile time.  Real gate — no continue-on-error.
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push' 
+      || github.event_name == 'workflow_dispatch') && 
+      needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Cache CPM packages
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/.cpm_cache
-          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
-          restore-keys: |
-            cpm-${{ runner.os }}-
+    - name: Cache CPM packages
+      uses: actions/cache@v6
+      with:
+        path: ${{ github.workspace }}/.cpm_cache
+        key: cpm-${{ runner.os }}-${{ hashFiles('cmake/dependencies.cmake') }}
+        restore-keys: |
+          cpm-${{ runner.os }}-
 
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: dev-checks-installed-header-gate
+    - name: Set up ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: dev-checks-installed-header-gate
 
-      - name: Configure shared build
-        run: |
-          cmake -B build_shared -S . \
-            -DCOOLPROP_SHARED_LIBRARY=ON \
-            -DCMAKE_INSTALL_INCLUDEDIR=cp-headers \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    - name: Configure shared build
+      run: |
+        cmake -B build_shared -S . \
+          -DCOOLPROP_SHARED_LIBRARY=ON \
+          -DCMAKE_INSTALL_INCLUDEDIR=cp-headers \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
-      - name: Build shared library
-        run: cmake --build build_shared -j$(nproc)
+    - name: Build shared library
+      run: cmake --build build_shared -j$(nproc)
 
-      - name: Run installed-header hygiene gate
-        run: ./dev/ci/check-installed-headers.sh build_shared
+    - name: Run installed-header hygiene gate
+      run: ./dev/ci/check-installed-headers.sh build_shared
 
+    needs:
+    - alpha_bridge_inputs
   atct-regenerator:
     name: ATcT regenerator tests
     # Offline gate for dev/atct/. The tests parse a committed HTML fixture and
     # read dev/fluids/*.json -- no network, no C++ build. Deliberately NO paths
     # filter so this can be a required check without deadlocking unrelated PRs.
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push')
+      && needs.alpha_bridge_inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+    - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.12'
 
-      - name: Install pytest
-        run: python -m pip install --upgrade pytest
+    - name: Install pytest
+      run: python -m pip install --upgrade pytest
 
-      - name: Run the ATcT regenerator tests
-        run: python -m pytest dev/atct/test_fetch_atct_formation.py -v
+    - name: Run the ATcT regenerator tests
+      run: python -m pytest dev/atct/test_fetch_atct_formation.py -v
+    needs:
+    - alpha_bridge_inputs
+  alpha_bridge_inputs:
+    name: AlphaBridge input check
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    concurrency:
+      group: alpha-bridge-inputs-${{ github.workflow }}-${{ github.sha }}-${{ 
+        github.event.schedule || github.event_name }}
+      cancel-in-progress: false
+    outputs:
+      changed: ${{ steps.identity.outputs.changed }}
+    steps:
+    - id: identity
+      name: Check source, workflow, variables, and runner inputs
+      env:
+        GH_TOKEN: ${{ github.token }}
+        AB_REPOSITORY: ${{ github.repository }}
+        AB_RUN_ID: ${{ github.run_id }}
+        AB_HEAD_SHA: ${{ github.sha }}
+        AB_EVENT: ${{ github.event_name }}
+        AB_SCHEDULE: ${{ github.event.schedule || '' }}
+        AB_VARIABLES: ${{ toJSON(vars) }}
+        AB_INPUTS: ${{ toJSON(inputs) }}
+      shell: bash
+      run: "python3 - <<'ALPHA_BRIDGE_CI_PY'\n\"\"\"Native scheduled-CI input check,
+        embedded in the owned fork configuration.\"\"\"\n\nfrom __future__ import
+        annotations\n\nimport hashlib\nimport json\nimport os\nimport urllib.parse\n\
+        import urllib.request\n\n\ndef changed(get, *, repository, run_id, identity,
+        job_name):\n    current = get(f\"/repos/{repository}/actions/runs/{run_id}\"\
+        )\n    event = current[\"event\"]\n    query = urllib.parse.urlencode(\n \
+        \       {\n            \"head_sha\": current[\"head_sha\"],\n            \"\
+        event\": event,\n            \"per_page\": 100,\n        }\n    )\n    runs
+        = get(f\"/repos/{repository}/actions/workflows/{current['workflow_id']}/runs?{query}\"\
+        )\n    for run in runs[\"workflow_runs\"]:\n        if run[\"id\"] == run_id:\n\
+        \            continue\n        if run.get(\"head_sha\") != current[\"head_sha\"\
+        ] or run.get(\"event\") != event:\n            raise ValueError(\"provider
+        returned a different CI input identity\")\n        page = 1\n        while
+        True:\n            jobs = get(\n                f\"/repos/{repository}/actions/runs/{run['id']}/jobs?per_page=100&page={page}\"\
+        \n            )[\"jobs\"]\n            for job in jobs:\n                if
+        (\n                    job[\"name\"] == job_name\n                    and
+        job.get(\"status\") == \"completed\"\n                    and job.get(\"conclusion\"\
+        ) == \"success\"\n                    and any(\n                        step[\"\
+        name\"] == f\"AlphaBridge input identity {identity}\"\n                  \
+        \      and step.get(\"conclusion\") == \"success\"\n                     \
+        \   for step in job.get(\"steps\", [])\n                    )\n          \
+        \      ):\n                    return False\n            if len(jobs) < 100:\n\
+        \                break\n            page += 1\n    return True\n\n\ndef main():\n\
+        \    inputs = {\n        \"configuration_commit\": os.environ[\"AB_HEAD_SHA\"\
+        ],\n        \"event\": os.environ[\"AB_EVENT\"],\n        \"schedule\": os.environ[\"\
+        AB_SCHEDULE\"],\n        \"variables\": json.loads(os.environ[\"AB_VARIABLES\"\
+        ]),\n        \"inputs\": json.loads(os.environ[\"AB_INPUTS\"]),\n        \"\
+        runner_image\": [os.environ.get(\"ImageOS\", \"\"), os.environ.get(\"ImageVersion\"\
+        , \"\")],\n    }\n    identity = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()\n\
+        \n    def get(path):\n        request = urllib.request.Request(\n        \
+        \    \"https://api.github.com\" + path,\n            headers={\n         \
+        \       \"Authorization\": \"Bearer \" + os.environ[\"GH_TOKEN\"],\n     \
+        \           \"Accept\": \"application/vnd.github+json\",\n               \
+        \ \"X-GitHub-Api-Version\": \"2026-03-10\",\n            },\n        )\n \
+        \       with urllib.request.urlopen(request, timeout=60) as response:\n  \
+        \          return json.load(response)\n\n    should_run = inputs[\"event\"\
+        ] != \"schedule\" or changed(\n        get,\n        repository=os.environ[\"\
+        AB_REPOSITORY\"],\n        run_id=int(os.environ[\"AB_RUN_ID\"]),\n      \
+        \  identity=identity,\n        job_name=\"AlphaBridge input check\",\n   \
+        \ )\n    with open(os.environ[\"GITHUB_OUTPUT\"], \"a\", encoding=\"utf-8\"\
+        ) as output:\n        output.write(f\"digest={identity}\\nchanged={str(should_run).lower()}\\\
+        n\")\n    print(\"CI inputs changed\" if should_run else \"CI inputs unchanged;
+        build and test jobs skipped\")\n\n\nif __name__ == \"__main__\":\n    main()\n\
+        \nALPHA_BRIDGE_CI_PY\n"
+    - name: AlphaBridge input identity ${{ steps.identity.outputs.digest }}
+      run: echo 'Input identity recorded'
