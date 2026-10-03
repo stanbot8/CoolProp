@@ -6,6 +6,7 @@ Changelog for CoolProp
 
 Breaking Changes:
 
+* Viscosity and thermal conductivity now raise an error for two-phase states (0 < Q < 1) in the HEOS, TTSE and BICUBIC backends, for every input pair; HEOS used to return the single-phase correlation evaluated at the bulk density, and the tabular backends a quality-weighted blend. Q = 0 and Q = 1 still give the saturated-phase values; in HEOS, imposing a phase still gives the metastable value. TTSE and BICUBIC (T, rho) and (T, s) inputs inside the dome now also report ``phase()`` as two-phase (`#3446 <https://github.com/CoolProp/CoolProp/issues/3446>`_, `#3447 <https://github.com/CoolProp/CoolProp/pull/3447>`_).
 * The deprecated ``coolprop()`` and ``coolpropsi()`` functions of the EES wrapper were removed. ``coolprop()`` worked in kPa and kJ and called the CoolProp v4 API, and it asserted the wrong unit system, so a model that satisfied its own error message was computing states a factor of 1000 away. ``coolpropsi()`` had not worked at all for years, because it called the external function with a string variable that was never assigned. An EES model calling ``coolprop()`` has to be changed to ``PropsSI``, with pressures in Pa and energies in J; its results change, because they were wrong before. ``CoolProp.LIB`` and ``COOLPROP_EES.dlf`` have to be installed from the same release: a mismatched pair now reports that rather than computing (`#3382 <https://github.com/CoolProp/CoolProp/pull/3382>`_).
 * The ``COOLPROP_DEBIAN_PACKAGE`` CMake variable and the ``wrappers/DEB`` packaging harness were removed.  The harness had not worked since 2014: a ``cmake-format`` pass broke its version parser, so it produced an empty version string, its ``debian/changelog`` was frozen at 5.0-1 while the tree moved to 8.x, and its ``control`` file depended on a package named ``dl`` that does not exist.  It could not build an installable package, no CI job ran it, and CoolProp is in neither the Debian nor the Ubuntu archive.  Note that CMake does not warn about unknown ``-D`` variables, so a build still passing ``-DCOOLPROP_DEBIAN_PACKAGE=ON`` now configures without error and silently produces no shared library; use ``-DCOOLPROP_SHARED_LIBRARY=ON`` instead.  See `#3388 <https://github.com/CoolProp/CoolProp/issues/3388>`_ for what maintaining Linux packages for the main distributions would require (`#3389 <https://github.com/CoolProp/CoolProp/pull/3389>`_).
 * **``CoolProp::parameters`` enum renumbered.**  ``iHmolar_formation`` was inserted after ``idipole_moment`` (`#3309 <https://github.com/CoolProp/CoolProp/pull/3309>`_), so every later parameter's integer value changes.  Code that stores, caches or hard-codes the integer value of a parameter key, rather than looking it up by name, must be rebuilt or updated.  SVDSBTL disk caches are rebuilt once on first use.
@@ -54,6 +55,15 @@ Highlights:
   fluid for seven refrigerants, and the ethanol correlation has a pole in reachable
   superheated vapor.  (`#3334 <https://github.com/CoolProp/CoolProp/pull/3334>`_, `#3352 <https://github.com/CoolProp/CoolProp/pull/3352>`_, `#3399 <https://github.com/CoolProp/CoolProp/pull/3399>`_, `#3402 <https://github.com/CoolProp/CoolProp/pull/3402>`_, `#3403 <https://github.com/CoolProp/CoolProp/pull/3403>`_,
   `#3404 <https://github.com/CoolProp/CoolProp/pull/3404>`_, `#3406 <https://github.com/CoolProp/CoolProp/pull/3406>`_, `#3428 <https://github.com/CoolProp/CoolProp/pull/3428>`_)
+
+* **Bollengier liquid-water backend** (``BOLLENGIER::Water``).  Gibbs-explicit
+  equation of state of Bollengier, Brown and Shaw, *J. Chem. Phys.* **151**\ :054501
+  (2019), covering 240-500 K to 2300 MPa -- including the cold high-pressure
+  region where IAPWS-95 refuses below the melting line.  Reproduces the paper's
+  own tabulated densities, heat capacities and sound speeds to 5e-6.
+  ``PT_INPUTS`` only, liquid only.  A cold high-pressure box
+  (p >= 1500 MPa and T <= 255 K), where the published surface is not usable,
+  is refused rather than returned.
 
 * **Relocatable CMake package.** See GitHub issue `#2144
   <https://github.com/CoolProp/CoolProp/issues/2144>`_. Static and shared
@@ -495,6 +505,8 @@ Highlights:
 * Numerous solver-robustness and graceful-error-handling fixes across the flash and density solvers (illegal quality inputs, zero-/one-length ``PropsSI`` arrays, incompressible molar requests, sub-``TminPsat`` saturation, ancillaries above the reducing temperature, and more).
 * **Incompressible backend hardening:** ``(d(rho)/dT)|p`` — and through it every enthalpy/entropy evaluation — now returns the *exact* value at ``T == Tbase`` instead of a tiny linear approximation across the singularity, for the common case where the would-be pole's coefficient is identically zero (the case for every ordinary, non-fractional fit). Added a regression test sweeping every shipped fluid's ``Tbase``, not just a hand-picked few. The :doc:`docs </fluid_properties/Incompressibles>` now explicitly call out that enthalpy/entropy of mixing is not modeled for incompressible solutions. Properties whose fit never actually ran no longer ship the optimizer's placeholder coefficients: querying them — e.g. ``INCOMP::LiBr`` viscosity (was: 1 Pa·s) and conductivity (was: 0 W/m/K), or ``LiBr``/``MITSW`` freezing temperature (was: ~0 K) — now raises a clear "not defined" error instead of returning plausible-looking garbage (issues `#1331`, `#2567`).
 * Fast single-phase ``HmolarSmolar`` / ``HmassSmass`` (H,S) flash for fluids that have no superancillary — pseudo-pure fluids (Air, R-404A, R-407C, R-410A, R-507A, SES36) and pure fluids built without one.  These previously fell onto a legacy blind temperature scan (~50 nested entropy solves); they now route the single-phase (h,s)→(T,ρ) solve through the dome-free homotopy legs of the superancillary cascade (supercritical isentrope, ideal-gas departure, and melting-line anchor), which require no saturation curve.  Air H,S inputs drop from ~160 ms to ~40 µs per call (~4000×) with identical results; two-phase or unconverged inputs fall through to the legacy path unchanged.
+* Mixture flashes with enthalpy, entropy or internal energy as an input: ``HmolarP``, ``SmolarP``, ``UmolarP``, ``DmolarHmolar``, ``DmolarSmolar`` and ``DmolarUmolar`` (and their mass-basis equivalents) now work for mixtures without a pre-built phase envelope.  They use nested one-dimensional solvers around the Michelsen PT flash, so single- and two-phase states are both handled (`#3148 <https://github.com/CoolProp/CoolProp/pull/3148>`_).
+* Mixture PT-flash robustness: the Michelsen phase-split solver converges where it returned grossly unconverged splits (`#3168 <https://github.com/CoolProp/CoolProp/issues/3168>`_, `#3170 <https://github.com/CoolProp/CoolProp/pull/3170>`_); near-dew two-phase states are no longer reported as single-phase liquid (`#3174 <https://github.com/CoolProp/CoolProp/pull/3174>`_); the stable single phase is selected by Gibbs-energy comparison and the envelope-guided two-phase path is fixed (`#3140 <https://github.com/CoolProp/CoolProp/pull/3140>`_); the ``PQ`` / ``QT`` flash with a built phase envelope no longer crashes or fails to converge (`#3192 <https://github.com/CoolProp/CoolProp/issues/3192>`_, `#3196 <https://github.com/CoolProp/CoolProp/pull/3196>`_); and the two-phase density solves are guarded against overflow (`#3187 <https://github.com/CoolProp/CoolProp/pull/3187>`_).
 * New native desktop GUI built with Tauri + React (`#2715`), plus a much-expanded Mathcad wrapper and interactive 3D molecule viewers on the fluid documentation pages.
 * Build-system modernization: git submodules replaced by CPM.cmake (boost fetched as a trimmed subset from ``CoolProp/boost-headers``), Eigen bumped to 5.0.1, and a broad C++17 cleanup that also cuts compile times.
 * Repository-wide code-quality program: enforced ``clang-format`` (pre-commit + CI), diff-only ``clang-tidy``, ``cppcheck``, CodeQL, include-what-you-use, and a single-script ``dev/ci/preflight.sh`` pre-push gate.
@@ -591,6 +603,12 @@ Highlights:
   helium–neon and neon–argon) mixtures now use the Tkaczuk et al. (2020)
   reducing parameters and departure function instead of the previous
   ideal-mixing assumption.
+
+* **Inverse** ``HAPropsSI`` **solves reject out-of-range inputs (#3197).** A
+  request with no physical solution — e.g. an enthalpy below the minimum
+  humid-air enthalpy at the given humidity ratio — now raises an error.
+  Before, the unbounded secant fallback returned its last, unconverged
+  iterate as a plausible-looking temperature or humidity ratio.
 
 * **Public C++ headers reorganized into an** ``include/CoolProp/`` **tier
   tree (GH #1280).** [BREAKING for C++ consumers, with back-compat shims.]
@@ -744,6 +762,8 @@ Issues closed:
 * `#2926 <https://github.com/CoolProp/CoolProp/issues/2926>`_ : clang-tidy sweep: actionable findings from files modified in the last month
 * `#2973 <https://github.com/CoolProp/CoolProp/issues/2973>`_ : SVDSBTL: add DT-indexed surface to natively handle P(D, T) — supersedes BICUBIC inverter patching attempt (#1301)
 * `#2988 <https://github.com/CoolProp/CoolProp/issues/2988>`_ : wheels not getting pushed to testpypi
+* `#3168 <https://github.com/CoolProp/CoolProp/issues/3168>`_ : solve_michelsen returns grossly-unconverged two-phase splits for several mixture PT flashes
+* `#3192 <https://github.com/CoolProp/CoolProp/issues/3192>`_ : [ISSUE] Mixture PQ-flash hard crashes with phase envelope branch
 
 Pull requests merged:
 
@@ -975,6 +995,14 @@ Pull requests merged:
 * `#3130 <https://github.com/CoolProp/CoolProp/pull/3130>`_ : fix(ci): name TestPyPI dev builds X.Y.Z.dev<ts> not .post<ts>
 * `#3141 <https://github.com/CoolProp/CoolProp/pull/3141>`_ : perf(transport): cache the ECS reference fluid instead of rebuilding it per call
 * `#3146 <https://github.com/CoolProp/CoolProp/pull/3146>`_ : fix(core): make debug_level + error/warning string globals thread-safe (per-thread error strings)
+* `#3137 <https://github.com/CoolProp/CoolProp/pull/3137>`_ : Mixture flash doc update
+* `#3140 <https://github.com/CoolProp/CoolProp/pull/3140>`_ : fix(flash): select stable phase via Gibbs comparison in blind mixture single phase, fix the envelope guided two-phase path
+* `#3148 <https://github.com/CoolProp/CoolProp/pull/3148>`_ : Mixture HSU_P flash + DHSU_T + HSU_D
+* `#3170 <https://github.com/CoolProp/CoolProp/pull/3170>`_ : fix(flash): converge the Michelsen mixture PT phase-split solver (#3168)
+* `#3174 <https://github.com/CoolProp/CoolProp/pull/3174>`_ : fix(flash): recover near-dew two-phase states misclassified as single-phase liquid (#3168)
+* `#3187 <https://github.com/CoolProp/CoolProp/pull/3187>`_ : fix(flash): harden two-phase density solves in VLERoutines (overflow guard + density rollback)
+* `#3196 <https://github.com/CoolProp/CoolProp/pull/3196>`_ : fix(flash): mixture PQ/QT two-phase flash with a built phase envelope — crash + non-convergence (#3192)
+* `#3197 <https://github.com/CoolProp/CoolProp/pull/3197>`_ : fix(humidair): reject out-of-range HAPropsSI inverse inputs instead of returning a bogus value
 
 7.2.0
 -----

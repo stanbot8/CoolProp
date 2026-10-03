@@ -61,7 +61,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Configure CMake
       run: |-
@@ -123,9 +123,9 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         AB_REPOSITORY: ${{ github.repository }}
         AB_RUN_ID: ${{ github.run_id }}
-        AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
+        AB_HEAD_SHA: 022b63e4f73ce25757e1d696a81ffeeba230c261
         AB_WORKFLOW_DIGEST: 
-          6e0e299fc2169691ca569890337f171d4de01dbea39f375b773300ad84d855c1
+          babeff153ff56d009d88260aa113400eb73e3bde1b37014d0bcdaa921c13680c
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

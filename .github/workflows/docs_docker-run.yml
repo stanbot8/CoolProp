@@ -75,7 +75,7 @@ jobs:
       with:
         fetch-depth: 0  # Fetch all history for git revision info
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Set up Git
       run: |
@@ -146,7 +146,7 @@ jobs:
         path: .ccache
         key: docs-ccache-${{ ((github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 
-          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}
+          '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha) }}
         restore-keys: |
           docs-ccache-
 
@@ -238,7 +238,7 @@ jobs:
         path: .ccache
         key: docs-ccache-${{ ((github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 
-          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}
+          '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha) }}
 
     - name: Build documentation with Doxygen
       shell: bash
@@ -349,9 +349,9 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         AB_REPOSITORY: ${{ github.repository }}
         AB_RUN_ID: ${{ github.run_id }}
-        AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
+        AB_HEAD_SHA: 022b63e4f73ce25757e1d696a81ffeeba230c261
         AB_WORKFLOW_DIGEST: 
-          b301ab5c04f60628d42e5c938194f605c576f39f553c9a707537e937cde0956f
+          f2999cc57069597494379807513bf21df96a93557b73e519fe9612aabddbe71d
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

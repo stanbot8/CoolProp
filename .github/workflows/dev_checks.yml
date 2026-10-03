@@ -85,7 +85,7 @@ jobs:
       uses: actions/checkout@v7
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Build REFPROP
       if: github.event_name != 'pull_request' || 
@@ -110,6 +110,13 @@ jobs:
         # historically did not, leaving the compile serial on the multi-vCPU runner.
       run: |-
         cmake --build build --config Asan -j$(nproc)
+
+      # The [locale] tests load fluids under a decimal-comma LC_NUMERIC; the runner
+      # image ships no such locale, and without it those tests would SKIP green.
+    - name: Generate de_DE.UTF-8 locale for the [locale] tests
+      run: |
+        sudo locale-gen de_DE.UTF-8
+        locale -a | grep -qi '^de_DE\.utf-\?8$'
     - name: run all the compiled Catch tests with address sanitizer
         # detect_stack_use_after_return is deliberately NOT enabled here
         # (CoolProp-xuu).  With REFPROP present — which CI builds — the 6
@@ -222,6 +229,7 @@ jobs:
         set +e
         timeout --signal=INT --kill-after=60 "$budget" \
           env ASAN_OPTIONS=detect_odr_violation=1 \
+              COOLPROP_REQUIRE_LOCALE_TESTS=1 \
               ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-18 \
               ./CatchTestRunner "~[slow]" --benchmark-samples 1
         rc=$?
@@ -253,7 +261,7 @@ jobs:
         fetch-depth: 0     # Fetch all history (especially branches)
 
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -284,7 +292,7 @@ jobs:
       env:
         ALPHA_BRIDGE_SOURCE_SHA: ${{ (github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 
-          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+          '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha }}
         ALPHA_BRIDGE_SOURCE_REF: ${{ (github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 'refs/heads/master' || 
           github.ref }}
@@ -296,7 +304,7 @@ jobs:
       with:
         name: CoolProp-${{ ((github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 
-          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) 
+          '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha) 
           }}-clang_format.patch
         path: clang_format.patch
 
@@ -314,7 +322,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -509,22 +517,37 @@ jobs:
     if: ${{ (github.event_name == 'pull_request' || github.event_name == 
       'workflow_dispatch') && needs.alpha_bridge_inputs.outputs.changed == 
       'true' }}
-    runs-on: ubuntu-latest
+    # An explicit label, not ubuntu-latest (still 24.04, whose image carries
+    # only clang-tidy 16-18): the 26.04 image ships clang-tidy 20, 21 and 22,
+    # and 21 is the major version macOS preflight runs (Homebrew llvm), so CI
+    # and local runs see the same check set.  When ubuntu-latest moves, this
+    # job does not move with it.
+    runs-on: ubuntu-26.04
     steps:
     - uses: actions/checkout@v7
       with:
         fetch-depth: 0     # full history for git diff against base
 
+      # clang-tidy >= 19 is REQUIRED: .clang-tidy uses ExcludeHeaderFilterRegex
+      # (new in 19), and clang-tidy 18 rejects the whole config on that
+      # unknown key, runs its default checks and still exits 0.
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
-    - name: Install clang-tidy-18 + ninja
+    - name: Install ninja; check clang-tidy-21
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang-tidy-18 ninja-build
-        sudo update-alternatives --install \
-          /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 100
-        clang-tidy --version
+        # clang-tidy-21 is preinstalled on the image, so naming it is a no-op
+        # today; it keeps the job working if the image ever drops it.
+        sudo apt-get install -y clang-tidy-21 ninja-build
+        # Every use below names /usr/bin/clang-tidy-21 explicitly, so what the
+        # bare `clang-tidy` alternative points at does not matter (on 24.04
+        # it silently stayed at 18).  Assert the version actually used.
+        /usr/bin/clang-tidy-21 --version
+        if ! /usr/bin/clang-tidy-21 --version | grep -q 'version 21\.'; then
+          echo "::error::/usr/bin/clang-tidy-21 is not version 21"
+          exit 1
+        fi
 
     - name: Cache CPM packages
       uses: actions/cache@v6
@@ -558,13 +581,15 @@ jobs:
 
     - name: Locate clang-tidy-diff.py
       id: diff_script
+        # Pinned to the clang-tidy-21 package's copy.  A `find /usr | head -1`
+        # used to pick whichever copy the runner image listed first -- LLVM
+        # 17's, or the Android NDK's -- rather than the one matching the
+        # installed clang-tidy.
       run: |
-        path=$(find /usr -name 'clang-tidy-diff*.py' 2>/dev/null | head -1)
-        if [ -z "$path" ]; then
-          echo "clang-tidy-diff.py not found via apt; falling back to upstream raw"
-          curl -sSL -o /tmp/clang-tidy-diff.py \
-            https://raw.githubusercontent.com/llvm/llvm-project/release/18.x/clang-tools-extra/clang-tidy/tool/clang-tidy-diff.py
-          path=/tmp/clang-tidy-diff.py
+        path=/usr/lib/llvm-21/share/clang/clang-tidy-diff.py
+        if [ ! -f "$path" ]; then
+          echo "::error::$path not found; clang-tidy-21 did not install it"
+          exit 1
         fi
         echo "path=$path" >> "$GITHUB_OUTPUT"
         echo "Using: $path"
@@ -574,7 +599,7 @@ jobs:
       shell: bash
       run: |
         BASE_SHA="${{ github.event.pull_request.base.sha }}"
-        HEAD_SHA="${{ ((github.event_name == 'schedule' || github.event_name == 'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}"
+        HEAD_SHA="${{ ((github.event_name == 'schedule' || github.event_name == 'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha) }}"
         echo "Comparing $HEAD_SHA against $BASE_SHA"
         # Negative pathspecs skip vendored / auto-generated files. Anything
         # that lives outside src/ + include/ won't have a compile_commands
@@ -587,8 +612,9 @@ jobs:
           | python3 ${{ steps.diff_script.outputs.path }} \
               -p1 \
               -path ${{ github.workspace }}/build \
+              -clang-tidy-binary /usr/bin/clang-tidy-21 \
               -regex '.*\.(c|cpp|h|hpp)$' \
-              -j$(nproc) \
+              -j"$(nproc)" \
               2>&1 | tee clang-tidy-diff.log
         echo "clang-tidy-diff.log size: $(wc -l < clang-tidy-diff.log) lines"
 
@@ -598,7 +624,7 @@ jobs:
       with:
         name: CoolProp-${{ ((github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 
-          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) 
+          '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha) 
           }}-clang-tidy-diff
         path: clang-tidy-diff.log
         if-no-files-found: warn
@@ -626,7 +652,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
@@ -707,7 +733,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Install cppcheck
       run: |
@@ -749,7 +775,7 @@ jobs:
       with:
         name: CoolProp-${{ ((github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 
-          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) 
+          '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha) 
           }}-cppcheck_results.txt
         path: cppcheck.txt
 
@@ -775,7 +801,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Install include-what-you-use
       run: |
@@ -815,7 +841,7 @@ jobs:
       with:
         name: CoolProp-${{ ((github.event_name == 'schedule' || 
           github.event_name == 'workflow_run') && 
-          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}-iwyu
+          '022b63e4f73ce25757e1d696a81ffeeba230c261' || github.sha) }}-iwyu
         path: iwyu.log
         if-no-files-found: warn
 
@@ -842,7 +868,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
@@ -907,7 +933,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
@@ -947,7 +973,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
@@ -989,7 +1015,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Cache CPM packages
       uses: actions/cache@v6
@@ -1038,7 +1064,7 @@ jobs:
 
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
-          'workflow_run') && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || 
+          'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
@@ -1074,9 +1100,9 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         AB_REPOSITORY: ${{ github.repository }}
         AB_RUN_ID: ${{ github.run_id }}
-        AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
+        AB_HEAD_SHA: 022b63e4f73ce25757e1d696a81ffeeba230c261
         AB_WORKFLOW_DIGEST: 
-          75e150d9d4ac3e6dea04a6f10ea31bfe82a247e4e52afd6bf362b45360706058
+          a69cdcc24fa5feb839ed91852224611e7a8f185b704d786a61fe6cddc30d71cf
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

@@ -1,24 +1,24 @@
 {
   "definition_blob_sha1": {
     ".github/workflows/alpha-bridge-ci-verify.yml": "21051178fb840f31162cde1a64943007a2178f3f",
-    ".github/workflows/delete_workflow_runs.yml": "97545c7eb8067a813f67ef0c731f1f20cb55729e",
-    ".github/workflows/dev_checks.yml": "2ffe0c7f29593a3158a4facb412c165079e000a3",
-    ".github/workflows/dev_msvc.yml": "c120699da93c971bb67f40d27abd093b9c3b5e9b",
-    ".github/workflows/docs_docker-run.yml": "730c4a8cbb2dd324171656119714ae2f17610921",
-    ".github/workflows/release_all_files.yml": "87c34ae3573a4cd989fd919f81bcf28c073f6f78"
+    ".github/workflows/delete_workflow_runs.yml": "b5f64557f3a329efc1fe89f4d13ba94ae2faa728",
+    ".github/workflows/dev_checks.yml": "63117718fcea8529ac3a211039a38ff259fd8a63",
+    ".github/workflows/dev_msvc.yml": "24079f01f56438b238df722258433d149e44b5dd",
+    ".github/workflows/docs_docker-run.yml": "bf2b5b56f6b07ddf4360220a6eeea9e7cdfe54c4",
+    ".github/workflows/release_all_files.yml": "05a6a8c24bef9ea5c30a9924e93530b6ee502c6a"
   },
   "definition_sha256": {
     ".github/workflows/alpha-bridge-ci-verify.yml": "f1d0d506e1faf2ef9e00102fbf464fa1a74203bf3463e623621402b9de9e8a45",
-    ".github/workflows/delete_workflow_runs.yml": "c2eec5c75d11712799599c6008279897b264a1d03d129704b6efd591647ea871",
-    ".github/workflows/dev_checks.yml": "d745c76e25f6df5e3e0a1fc64fdb8324578a129aafcea8175d93d4131719a1b6",
-    ".github/workflows/dev_msvc.yml": "1ab7d045bf81e2de9bd96f0999607416466a86cdd5e7e6eb3f96d9d8ab332fbe",
-    ".github/workflows/docs_docker-run.yml": "455c7c88ed01fefdfc70dea0c982d4d01615cc60e294636e2ed6d4627788e6e5",
-    ".github/workflows/release_all_files.yml": "78ac172690ef2f63ab9c775d4963efd1b970619982b79443a57dd72aa9daf818"
+    ".github/workflows/delete_workflow_runs.yml": "102c1e26bcd575aea1581696c32e5301e23b30e9e7ce85895ff372f5cf36cff9",
+    ".github/workflows/dev_checks.yml": "87bd1cd8f15cca4ef85f13505bc3e0cb5065a9b3005154c4f9f4e6c4235968bb",
+    ".github/workflows/dev_msvc.yml": "82df1f1cd9a8d6c7aa5bffce903980b310bb1c9321141dfa9aaed9702fdd427d",
+    ".github/workflows/docs_docker-run.yml": "d692133b22e84b8bb202e3822f34636358acdb94c0628fe05fb2fac45af557f8",
+    ".github/workflows/release_all_files.yml": "f4f91ee45f9084ad62618e9ed99350e99dd89147d81063885650a471adecf70f"
   },
   "generator_sha256": "9fe7eb2612d4c4d8436e5a627541cad32d0dcba429639855b5a0a2af04b9729a",
   "schema": "alpha-bridge/fork-ci",
   "source_branch": "master",
-  "source_commit": "20ebc285883192885ccfdbd9d9d9ad6032ad276a",
+  "source_commit": "022b63e4f73ce25757e1d696a81ffeeba230c261",
   "source_repository": "CoolProp/CoolProp",
   "version": 1,
   "workflows": [
