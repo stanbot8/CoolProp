@@ -100,14 +100,16 @@ jobs:
       env:
         REFPROP_GPG_PASSPHRASE: ${{ secrets.REFPROP_GPG_PASSPHRASE }}
     - name: mkdir
-      run: mkdir build && cd build
+      run: |-
+        mkdir build && cd build
     - name: cmake config
-      run: cd build && CXX=clang++ cmake .. -DCMAKE_BUILD_TYPE=Asan 
-        -DCOOLPROP_ASAN=ON -DCOOLPROP_CATCH_MODULE=ON
+      run: |-
+        cd build && CXX=clang++ cmake .. -DCMAKE_BUILD_TYPE=Asan -DCOOLPROP_ASAN=ON -DCOOLPROP_CATCH_MODULE=ON
     - name: build all Catch tests
         # -j$(nproc): every other build job already parallelises; the ASan job
         # historically did not, leaving the compile serial on the multi-vCPU runner.
-      run: cmake --build build --config Asan -j$(nproc)
+      run: |-
+        cmake --build build --config Asan -j$(nproc)
     - name: run all the compiled Catch tests with address sanitizer
         # detect_stack_use_after_return is deliberately NOT enabled here
         # (CoolProp-xuu).  With REFPROP present — which CI builds — the 6
@@ -550,7 +552,9 @@ jobs:
     - name: Generate auto-generated headers
         # The all_*_JSON.h headers are generated at build time from
         # dev/fluids/. clang-tidy needs them on disk to parse src/ files.
-      run: cmake --build ${{ github.workspace }}/build --target generate_headers
+      run: |-
+        cmake --build ${{ github.workspace }}/build --target generate_headers
+
 
     - name: Locate clang-tidy-diff.py
       id: diff_script
@@ -670,12 +674,15 @@ jobs:
       # break silently the day that changes. Opt out explicitly instead.
     - name: Configure CPP
       if: ${{ matrix.language == 'cpp' }}
-      run: cmake -DCOOLPROP_MY_MAIN=dev/ci/main.cpp -DCOOLPROP_USE_CCACHE=OFF -B
-        ${{github.workspace}}/build -S .
+      run: |-
+        cmake -DCOOLPROP_MY_MAIN=dev/ci/main.cpp -DCOOLPROP_USE_CCACHE=OFF -B ${{github.workspace}}/build -S .
+
 
     - name: Build CPP
       if: ${{ matrix.language == 'cpp' }}
-      run: cmake --build ${{github.workspace}}/build --config Release
+      run: |-
+        cmake --build ${{github.workspace}}/build --config Release
+
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
@@ -732,7 +739,9 @@ jobs:
       if: ${{ always() }}
       continue-on-error: true
       shell: bash
-      run: python ./dev/ci/colorize_cppcheck_results.py
+      run: |-
+        python ./dev/ci/colorize_cppcheck_results.py
+
 
     - name: Upload cppcheck results as artifact
       if: ${{ always() }}
@@ -859,14 +868,16 @@ jobs:
       #    source tree (extraPaths) and needs numpy stubs; the smoke file uses
       #    typing.assert_type, so it is checked, not executed.
     - name: pyright type smoke
-      run: uvx --with numpy pyright@1.1.409 --project 
-        dev/stubs/pyrightconfig.smoke.json
+      run: |-
+        uvx --with numpy pyright@1.1.409 --project dev/stubs/pyrightconfig.smoke.json
+
 
       # 3. Stub validity under mypy. --ignore-missing-imports drops noise from
       #    sibling modules mypy pulls in transitively; the stub must be clean.
     - name: mypy stub check
-      run: uvx mypy@1.19.1 --ignore-missing-imports 
-        wrappers/Python/CoolProp/CoolProp.pyi
+      run: |-
+        uvx mypy@1.19.1 --ignore-missing-imports wrappers/Python/CoolProp/CoolProp.pyi
+
 
     needs:
     - alpha_bridge_inputs
@@ -904,7 +915,9 @@ jobs:
         python-version: '3.12'
 
     - name: Check pinned fastchebpure release matches current EOS
-      run: python3 dev/scripts/check_superanc_release_pin.py
+      run: |-
+        python3 dev/scripts/check_superanc_release_pin.py
+
 
     needs:
     - alpha_bridge_inputs
@@ -953,8 +966,9 @@ jobs:
         # safeguards this area relies on, and both importorskip away without
         # them -- so naming only test_json_sanity.py meant they never ran here.
         # `uvx --with` matches the pyright job above.
-      run: uvx --with numpy --with scipy pytest@9.1.1 
-        dev/incompressible_liquids/ -q --color=no
+      run: |-
+        uvx --with numpy --with scipy pytest@9.1.1 dev/incompressible_liquids/ -q --color=no
+
 
     needs:
     - alpha_bridge_inputs
@@ -1000,10 +1014,14 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build shared library
-      run: cmake --build build_shared -j$(nproc)
+      run: |-
+        cmake --build build_shared -j$(nproc)
+
 
     - name: Run installed-header hygiene gate
-      run: ./dev/ci/check-installed-headers.sh build_shared
+      run: |-
+        ./dev/ci/check-installed-headers.sh build_shared
+
 
     needs:
     - alpha_bridge_inputs
@@ -1028,10 +1046,13 @@ jobs:
         python-version: '3.12'
 
     - name: Install pytest
-      run: python -m pip install --upgrade pytest
+      run: |-
+        python -m pip install --upgrade pytest
+
 
     - name: Run the ATcT regenerator tests
-      run: python -m pytest dev/atct/test_fetch_atct_formation.py -v
+      run: |-
+        python -m pytest dev/atct/test_fetch_atct_formation.py -v
     needs:
     - alpha_bridge_inputs
   alpha_bridge_inputs:
@@ -1055,7 +1076,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          b8f96263836c36986a572560ead400b053775e5e5dc619f60d715f980854b360
+          75e150d9d4ac3e6dea04a6f10ea31bfe82a247e4e52afd6bf362b45360706058
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}
