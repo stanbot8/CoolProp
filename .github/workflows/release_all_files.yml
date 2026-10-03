@@ -2,7 +2,8 @@ name: Release workflow run
 
 on:
   push:
-    branches: [feature/automated_release]
+    branches:
+    - feature/automated_release
   #   branches: [ 'master', 'main', 'develop', 'feature/automated_release' ]
   #   tags: [ 'v*' ]
   # pull_request:
@@ -138,6 +139,13 @@ jobs:
   # action-download-artifact and takes the whole deploy down with it -- which is
   # exactly how gh#3315 went unnoticed for six weeks after PR #3245 renamed
   # csharp_builder.yml into java_builder.yml.
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
     if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
@@ -152,9 +160,8 @@ jobs:
       contents: read
     outputs:
       workflows: ${{ steps.resolve.outputs.workflows }}
-    steps:
-
-    - name: Fetch the sources
+    steps: -
+      name: Fetch the sources
       uses: actions/checkout@v7
       with:
         ref: ${{ needs.set_vars.outputs.branch }}
@@ -210,6 +217,13 @@ jobs:
         workflows=$(jq -cn '$ARGS.positional' --args "${builders[@]}")
         echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
       }}
   collect_binaries:
@@ -220,7 +234,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu]
+        os:
+        - ubuntu
         workflow: ${{ fromJSON(needs.list_builders.outputs.workflows) }}
     uses: ./.github/workflows/release_get_artifact.yml
     with:
@@ -317,6 +332,13 @@ jobs:
   # Worth knowing before pointing anyone at it: the runner's glibc sets the
   # oldest distribution this can run on.  It is a convenience build for current
   # systems, not a manylinux-style portable artifact.
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
       }}
   prepare_linux_tarball:
@@ -331,12 +353,8 @@ jobs:
     # than inherited, so the repository default cannot widen it later.
     permissions:
       contents: read
-    steps:
-
-    # CMakeLists.txt asks for find_package(Python 3.9 REQUIRED), and pinning it
-    # the way packaging_offline.yml does keeps this job from depending on
-    # whatever python3 the runner image happens to ship.
-    - uses: actions/setup-python@v7
+    steps: -
+      uses: actions/setup-python@v7
       with:
         python-version: 3.x
 
@@ -609,6 +627,13 @@ jobs:
         if-no-files-found: error
 
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
       }}
   deploy_files:
@@ -681,6 +706,13 @@ jobs:
         RSYNC_OPTS="-a --chmod=Dug=rwx,Do=rx,Fug=rw,Fo=r -z --stats --delete"
         rsync $RSYNC_DRY_RUN $RSYNC_OPTS "binaries/" frs.sf.net-${{ secrets.SF_SSH_USER }}:/home/frs/project/coolprop/CoolProp/${{ needs.set_vars.outputs.target }}
         rsync $RSYNC_DRY_RUN $RSYNC_OPTS "html/"     frs.sf.net-${{ secrets.SF_SSH_USER }}:/home/project-web/coolprop/htdocs/${{ needs.set_vars.outputs.webdir }}
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
       }}
   alpha_bridge_inputs:
@@ -704,7 +736,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          1d5805598c52a0d79ea9cb7209616b99e17bbca10df41fe1577c9cd4b12011b2
+          95acab768812d484791dbdd56ea3d5d6d7843d5313f3c8e50a06f40f28fa32f6
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

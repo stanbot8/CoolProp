@@ -11,20 +11,32 @@ on:
         required: false
         type: boolean
   push:
-    branches: [master, main, develop, actions_docs]
-    tags: [v*]
+    branches:
+    - master
+    - main
+    - develop
+    - actions_docs
+    tags:
+    - v*
   pull_request:
-    branches: [master, main, develop]
+    branches:
+    - master
+    - main
+    - develop
 
 concurrency:
   # Cancel superseded runs on the same ref to cut CI backlog on heavy
   # dev days (repeated pushes to an open PR).  Protected: master / main
   # / develop and tags never cancel, so mainline + release runs always
   # complete.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' && (github.ref != 
-    'refs/heads/master' && github.ref != 'refs/heads/main' && github.ref != 
-    'refs/heads/develop' && !startsWith(github.ref, 'refs/tags/')) }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'schedule' && 
+    'refs/heads/master' || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && ((github.event_name
+    == 'schedule' && 'refs/heads/master' || github.ref) != 'refs/heads/master' 
+    && (github.event_name == 'schedule' && 'refs/heads/master' || github.ref) !=
+    'refs/heads/main' && (github.event_name == 'schedule' && 'refs/heads/master'
+    || github.ref) != 'refs/heads/develop' && !startsWith((github.event_name == 
+    'schedule' && 'refs/heads/master' || github.ref), 'refs/tags/')) }}
 
 jobs:
   build:
@@ -54,6 +66,12 @@ jobs:
       # bind-mounted-workspace reasoning as the SVD dir above.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     container:
       image: ghcr.io/coolprop/coolprop_docs_02_builder:dev
       # options: --user 1001 --group 1001
@@ -65,6 +83,8 @@ jobs:
     - uses: actions/checkout@v7
       with:
         fetch-depth: 0  # Fetch all history for git revision info
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Set up Git
       run: |
         git config --global --add safe.directory $GITHUB_WORKSPACE
@@ -132,7 +152,8 @@ jobs:
       if: ${{ !env.ACT }}
       with:
         path: .ccache
-        key: docs-ccache-${{ github.sha }}
+        key: docs-ccache-${{ (github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}
         restore-keys: |
           docs-ccache-
 
@@ -144,8 +165,8 @@ jobs:
         echo ${{ github.event.schedule }}
         echo "COOLPROP_DAILY=${{ github.event.schedule == '0 2 * * *' }}" >> $GITHUB_ENV
         echo "COOLPROP_WEEKLY=${{ github.event.schedule == '0 4 * * 1' }}" >> $GITHUB_ENV
-        echo ${{ github.ref }}
-        echo "COOLPROP_TAGGED=${{ contains(github.ref, 'refs/tags') }}" >> $GITHUB_ENV
+        echo ${{ (github.event_name == 'schedule' && 'refs/heads/master' || github.ref) }}
+        echo "COOLPROP_TAGGED=${{ contains((github.event_name == 'schedule' && 'refs/heads/master' || github.ref), 'refs/tags') }}" >> $GITHUB_ENV
         cat $GITHUB_ENV
 
     - name: Variable calculations
@@ -222,7 +243,8 @@ jobs:
         'workflow_dispatch') }}
       with:
         path: .ccache
-        key: docs-ccache-${{ github.sha }}
+        key: docs-ccache-${{ (github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}
 
     - name: Build documentation with Doxygen
       shell: bash
@@ -292,7 +314,8 @@ jobs:
     # Do not deploy intermediate builds, only deploy on tags
     - build
     - alpha_bridge_inputs
-    if: ${{ (startsWith(github.ref, 'refs/tags/')) && 
+    if: ${{ (startsWith((github.event_name == 'schedule' && 'refs/heads/master' 
+      || github.ref), 'refs/tags/')) && 
       needs.alpha_bridge_inputs.outputs.changed == 'true' }}
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
@@ -313,6 +336,13 @@ jobs:
       if: ${{ !env.ACT }} # skip during local actions testing
       id: deployment
       uses: actions/deploy-pages@v5
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
   alpha_bridge_inputs:
     name: AlphaBridge input check
     runs-on: ubuntu-latest
@@ -334,7 +364,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          83c72010dcf005186b287f49f5410e46c2a4bba27a54812cf4b8cc1af40a0ced
+          803a9faaadcc6921706c08483de48f4f544d5492b3ada795ce54fa0543b3fe56
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

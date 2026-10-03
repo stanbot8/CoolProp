@@ -20,9 +20,13 @@ name: Development checks
 
 on:
   push:
-    branches: [master]
+    branches:
+    - master
   pull_request:
-    branches: [master, main, develop]
+    branches:
+    - master
+    - main
+    - develop
   schedule:
   - cron: 15 8 * * 0        # weekly Sunday — cppcheck, iwyu fallback
   - cron: 15 8 * * 0,4      # twice weekly Sun+Thu — codeql fallback
@@ -33,10 +37,14 @@ concurrency:
   # dev days (repeated pushes to an open PR).  Protected: master / main
   # / develop and tags never cancel, so mainline + release runs always
   # complete.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' && (github.ref != 
-    'refs/heads/master' && github.ref != 'refs/heads/main' && github.ref != 
-    'refs/heads/develop' && !startsWith(github.ref, 'refs/tags/')) }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'schedule' && 
+    'refs/heads/master' || github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' && ((github.event_name
+    == 'schedule' && 'refs/heads/master' || github.ref) != 'refs/heads/master' 
+    && (github.event_name == 'schedule' && 'refs/heads/master' || github.ref) !=
+    'refs/heads/main' && (github.event_name == 'schedule' && 'refs/heads/master'
+    || github.ref) != 'refs/heads/develop' && !startsWith((github.event_name == 
+    'schedule' && 'refs/heads/master' || github.ref), 'refs/tags/')) }}
 
 jobs:
   asan:
@@ -69,11 +77,16 @@ jobs:
     timeout-minutes: 90
     strategy:
       matrix:
-        os: [ubuntu-latest]
-        python-version: [3.13]
+        os:
+        - ubuntu-latest
+        python-version:
+        - 3.13
     steps:
     - name: checkout
       uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Build REFPROP
       if: github.event_name != 'pull_request' || 
         github.event.pull_request.head.repo.full_name == github.repository
@@ -222,6 +235,13 @@ jobs:
         fi
         exit $rc
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   clang-format:
@@ -237,13 +257,15 @@ jobs:
       with:
         fetch-depth: 0     # Fetch all history (especially branches)
 
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Install uv
       uses: astral-sh/setup-uv@v7
 
     - name: Run clang-format against C++ files touched by the PR
       shell: bash
       run: |
-        echo "GITHUB_REF=$GITHUB_REF GITHUB_BASE_REF=$GITHUB_BASE_REF GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
+        echo "GITHUB_REF=$ALPHA_BRIDGE_SOURCE_REF GITHUB_BASE_REF=$GITHUB_BASE_REF GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
         # Pin clang-format to the version declared in .pre-commit-config.yaml
         # so CI and the local pre-commit hook always run the same binary.
         VER=$(awk '/mirrors-clang-format/{f=1} f && /^[[:space:]]*rev:/{print $2; exit}' .pre-commit-config.yaml | tr -d 'v"')
@@ -267,9 +289,18 @@ jobs:
       if: ${{ failure() }}
       uses: actions/upload-artifact@v7
       with:
-        name: CoolProp-${{ github.sha }}-clang_format.patch
+        name: CoolProp-${{ (github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) 
+          }}-clang_format.patch
         path: clang_format.patch
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   nanobind-wheels:
@@ -282,6 +313,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Install uv
       uses: astral-sh/setup-uv@v7
 
@@ -456,6 +490,13 @@ jobs:
         python dev/pdsim_cimport_contract/run_contract.py
         deactivate
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   clang-tidy:
@@ -481,6 +522,8 @@ jobs:
       with:
         fetch-depth: 0     # full history for git diff against base
 
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Install clang-tidy-18 + ninja
       run: |
         sudo apt-get update
@@ -535,7 +578,7 @@ jobs:
       shell: bash
       run: |
         BASE_SHA="${{ github.event.pull_request.base.sha }}"
-        HEAD_SHA="${{ github.sha }}"
+        HEAD_SHA="${{ (github.event_name == 'schedule' && '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}"
         echo "Comparing $HEAD_SHA against $BASE_SHA"
         # Negative pathspecs skip vendored / auto-generated files. Anything
         # that lives outside src/ + include/ won't have a compile_commands
@@ -557,10 +600,19 @@ jobs:
       if: ${{ always() }}
       uses: actions/upload-artifact@v7
       with:
-        name: CoolProp-${{ github.sha }}-clang-tidy-diff
+        name: CoolProp-${{ (github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) 
+          }}-clang-tidy-diff
         path: clang-tidy-diff.log
         if-no-files-found: warn
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   codeql:
@@ -577,11 +629,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [cpp, python]
+        language:
+        - cpp
+        - python
     steps:
     - name: Checkout
       uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
@@ -640,6 +697,13 @@ jobs:
       with:
         category: /language:${{ matrix.language }}
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   cppcheck:
@@ -656,6 +720,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Install cppcheck
       run: |
         sudo apt-get update
@@ -692,9 +759,18 @@ jobs:
       if: ${{ always() }}
       uses: actions/upload-artifact@v7
       with:
-        name: CoolProp-${{ github.sha }}-cppcheck_results.txt
+        name: CoolProp-${{ (github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) 
+          }}-cppcheck_results.txt
         path: cppcheck.txt
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   iwyu:
@@ -715,6 +791,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Install include-what-you-use
       run: |
         sudo apt-get update
@@ -751,10 +830,18 @@ jobs:
       if: ${{ always() }}
       uses: actions/upload-artifact@v7
       with:
-        name: CoolProp-${{ github.sha }}-iwyu
+        name: CoolProp-${{ (github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha) }}-iwyu
         path: iwyu.log
         if-no-files-found: warn
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   type-stubs:
@@ -776,6 +863,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
@@ -809,6 +899,13 @@ jobs:
       run: uvx mypy@1.19.1 --ignore-missing-imports 
         wrappers/Python/CoolProp/CoolProp.pyi
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   superanc-pin:
@@ -835,6 +932,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
@@ -843,6 +943,13 @@ jobs:
     - name: Check pinned fastchebpure release matches current EOS
       run: python3 dev/scripts/check_superanc_release_pin.py
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   incomp-json-sanity:
@@ -869,6 +976,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
@@ -889,6 +999,13 @@ jobs:
       run: uvx --with numpy --with scipy pytest@9.1.1 
         dev/incompressible_liquids/ -q --color=no
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   installed-header-gate:
@@ -906,6 +1023,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Cache CPM packages
       uses: actions/cache@v6
       with:
@@ -934,6 +1054,13 @@ jobs:
     - name: Run installed-header hygiene gate
       run: ./dev/ci/check-installed-headers.sh build_shared
 
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   atct-regenerator:
@@ -947,6 +1074,9 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+      with:
+        ref: ${{ github.event_name == 'schedule' && 
+          '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
     - name: Set up Python
       uses: actions/setup-python@v7
       with:
@@ -957,6 +1087,13 @@ jobs:
 
     - name: Run the ATcT regenerator tests
       run: python -m pytest dev/atct/test_fetch_atct_formation.py -v
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
   alpha_bridge_inputs:
@@ -980,7 +1117,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          3971476cc34109b91470f250433aa275125e8e94cb8fd53f8cc183cf956e0134
+          b546e13d9cffd4e357d9b489f660275539b5a9123fb767d780fbfb55ae8bd7b2
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

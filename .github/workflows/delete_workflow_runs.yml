@@ -14,6 +14,13 @@ jobs:
         repository: ${{ github.repository }}
         retain_days: 30
         keep_minimum_runs: 0
+    env:
+      ALPHA_BRIDGE_SOURCE_SHA: ${{ github.event_name == 'schedule' && 
+        '20ebc285883192885ccfdbd9d9d9ad6032ad276a' || github.sha }}
+      ALPHA_BRIDGE_SOURCE_REF: ${{ github.event_name == 'schedule' && 
+        'refs/heads/master' || github.ref }}
+      ALPHA_BRIDGE_SOURCE_REF_NAME: ${{ github.event_name == 'schedule' && 
+        'master' || github.ref_name }}
     needs:
     - alpha_bridge_inputs
     if: ${{ (success()) && needs.alpha_bridge_inputs.outputs.changed == 'true' 
@@ -39,7 +46,7 @@ jobs:
         AB_RUN_ID: ${{ github.run_id }}
         AB_HEAD_SHA: 20ebc285883192885ccfdbd9d9d9ad6032ad276a
         AB_WORKFLOW_DIGEST: 
-          6ca037f6e29f8992c8c685006fae6bd303874c13c48304075ca9bd24e4a9b5b7
+          112c9ca7712083e614f38c10cef3ba0d3baa22a1fc6d744ba3b6f9a73e5bc2be
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}
