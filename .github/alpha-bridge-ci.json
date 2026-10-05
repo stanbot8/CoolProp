@@ -1,21 +1,21 @@
 {
   "definition_blob_sha1": {
-    ".github/workflows/alpha-bridge-ci-verify.yml": "21051178fb840f31162cde1a64943007a2178f3f",
-    ".github/workflows/delete_workflow_runs.yml": "b5f64557f3a329efc1fe89f4d13ba94ae2faa728",
-    ".github/workflows/dev_checks.yml": "63117718fcea8529ac3a211039a38ff259fd8a63",
-    ".github/workflows/dev_msvc.yml": "24079f01f56438b238df722258433d149e44b5dd",
-    ".github/workflows/docs_docker-run.yml": "bf2b5b56f6b07ddf4360220a6eeea9e7cdfe54c4",
-    ".github/workflows/release_all_files.yml": "05a6a8c24bef9ea5c30a9924e93530b6ee502c6a"
+    ".github/workflows/alpha-bridge-ci-verify.yml": "d0cf89303388ac1271c908436e9f4bfe75bae884",
+    ".github/workflows/delete_workflow_runs.yml": "3b3fbe3bc095c405f1c3c7b10731f6a153ec8c6d",
+    ".github/workflows/dev_checks.yml": "c5f09c27aa63ac2df463fff3cc4c7b239f3b754e",
+    ".github/workflows/dev_msvc.yml": "a9be53333279f8996143bcd72cec9cedcdec49c3",
+    ".github/workflows/docs_docker-run.yml": "f42eefece1f1815b540b83aee2c7d8b414d38fd5",
+    ".github/workflows/release_all_files.yml": "83286ad157044e8393253befe072c2d66a84bb32"
   },
   "definition_sha256": {
-    ".github/workflows/alpha-bridge-ci-verify.yml": "f1d0d506e1faf2ef9e00102fbf464fa1a74203bf3463e623621402b9de9e8a45",
-    ".github/workflows/delete_workflow_runs.yml": "102c1e26bcd575aea1581696c32e5301e23b30e9e7ce85895ff372f5cf36cff9",
-    ".github/workflows/dev_checks.yml": "87bd1cd8f15cca4ef85f13505bc3e0cb5065a9b3005154c4f9f4e6c4235968bb",
-    ".github/workflows/dev_msvc.yml": "82df1f1cd9a8d6c7aa5bffce903980b310bb1c9321141dfa9aaed9702fdd427d",
-    ".github/workflows/docs_docker-run.yml": "d692133b22e84b8bb202e3822f34636358acdb94c0628fe05fb2fac45af557f8",
-    ".github/workflows/release_all_files.yml": "f4f91ee45f9084ad62618e9ed99350e99dd89147d81063885650a471adecf70f"
+    ".github/workflows/alpha-bridge-ci-verify.yml": "99e25329cff2a8ae245f2f99850472bdd82f571c3bc33fadfc5ac11b9f29cb7e",
+    ".github/workflows/delete_workflow_runs.yml": "4995b3cb8bebffb45bf2aa2d6309635249d4e488b0cc8ef8f0ccb0c66b27f5b2",
+    ".github/workflows/dev_checks.yml": "7240c479b5373f71547a7d1d84c4acffd59ab3d0c573c566ecf8ef83668b6e7d",
+    ".github/workflows/dev_msvc.yml": "bd0ba8ac96b85b58f4dbac2d4673fd8a862210c703288084f2921eff336bc664",
+    ".github/workflows/docs_docker-run.yml": "3a16364c64a61af530bc8af9aeead06af9b120f6d4b9f4b44d7b78ad59789397",
+    ".github/workflows/release_all_files.yml": "cb8a0e29cebb645927b860f82a5699d1a4ceb973044d203c22d1eca041832d0f"
   },
-  "generator_sha256": "9fe7eb2612d4c4d8436e5a627541cad32d0dcba429639855b5a0a2af04b9729a",
+  "generator_sha256": "8bff038bcb711330ba78bf433a2923d57d4ddfeedd59b8324e44e2a59f6b0389",
   "schema": "alpha-bridge/fork-ci",
   "source_branch": "master",
   "source_commit": "022b63e4f73ce25757e1d696a81ffeeba230c261",
