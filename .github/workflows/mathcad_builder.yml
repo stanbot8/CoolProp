@@ -7,8 +7,6 @@ on:
     tags: ['v*']
   pull_request:
     branches: ['master', 'main', 'develop']
-  # ========= Run on call from other workflows
-  workflow_call:
 
 concurrency:
   # Cancel superseded runs on the same ref to cut CI backlog on heavy
@@ -91,9 +89,10 @@ jobs:
       actions: read
       contents: read
     concurrency:
-      group: alpha-bridge-inputs-${{ github.workflow }}-${{ github.sha }}-${{ 
-        github.event.schedule || github.event_name }}
+      group: alpha-bridge-inputs-d3d4d7be156ed611-${{ github.workflow }}-${{ 
+        github.sha }}-${{ github.event.schedule || github.event_name }}
       cancel-in-progress: false
+      queue: max
     outputs:
       changed: ${{ steps.identity.outputs.changed }}
     steps:
@@ -109,7 +108,7 @@ jobs:
         AB_REF: ${{ (github.event_name == 'schedule' || github.event_name == 
           'workflow_run') && 'refs/heads/master' || github.ref }}
         AB_WORKFLOW_DIGEST: 
-          16939aa5696ba4aaa78ead0f767a702db83e515a0636a6e46450c8e4f9be0e36
+          a5b50d3bcf00dd9c631164a8a60a00f0efd3229f7fea2290ec8628b0eeb7147b
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}

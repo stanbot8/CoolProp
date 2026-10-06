@@ -1,15 +1,9 @@
-name: Windows Installer
+name: Mathcad wrapper
 
 on:
-  push:
-    branches: ['master', 'main', 'develop', 'actions_installer']
-    tags: ['v*']
-  pull_request:
-    branches: ['master', 'main', 'develop']
-
-env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
-  BUILD_TYPE: Release
+  # ========= Run on Pushes and Pull_Requests
+  # ========= Run on call from other workflows
+  workflow_call:
 
 concurrency:
   # Cancel superseded runs on the same ref to cut CI backlog on heavy
@@ -30,10 +24,6 @@ concurrency:
     github.event_name == 'workflow_run') && 'refs/heads/master' || github.ref), 
     'refs/tags/')) }}
 
-# Default the GITHUB_TOKEN to read-only; jobs that need more opt in explicitly.
-permissions:
-  contents: read
-
 jobs:
   build:
 
@@ -42,29 +32,18 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+    # Get the PTC build library and header in the proper location
       with:
         ref: ${{ (github.event_name == 'schedule' || github.event_name == 
           'workflow_run') && '022b63e4f73ce25757e1d696a81ffeeba230c261' || 
           github.sha }}
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install requests packaging
-
-    # See: https://github.com/actions/runner-images/issues/12464
-    - name: Install Inno Setup
-      shell: powershell
-      run: |
-        choco install innosetup -y
-
-    - name: Extract CoolProp version from CMakeLists.txt
+    - name: Get dependencies
       shell: bash
       run: |
-        set -x
-        COOLPROP_VERSION=$(python dev/extract_version.py --cmake-only)
-        echo COOLPROP_VERSION=$COOLPROP_VERSION >> $GITHUB_ENV
-        # Create the build directory too
-        mkdir build
+        mkdir "Custom Functions"
+        cd "Custom Functions"        
+        cp ../wrappers/MathCAD/Prime/libs/MCADINCL.H .
+        cp ../wrappers/MathCAD/Prime/libs/mcaduser.lib .
 
     - name: Cache CPM packages
       uses: actions/cache@v6
@@ -75,66 +54,27 @@ jobs:
           cpm-${{ runner.os }}-
 
     - name: Configure CMake
-      working-directory: ./build
-      shell: bash
       run: |-
-        cmake -DCMAKE_BUILD_TYPE:STRING=$BUILD_TYPE -DCOOLPROP_WINDOWS_PACKAGE:BOOL=ON ..
+        cmake -DCOOLPROP_PRIME_MODULE:BOOL=ON -DCOOLPROP_PRIME_ROOT:STRING="${{ github.workspace }}" -B build -S .
 
 
     - name: Build
-      working-directory: ./build
+      # `$(nproc)` is empty in the default Windows pwsh shell (nproc is a
+      # GNU coreutils binary, not a pwsh command), collapsing to a bare `-j`.
+      # Run under Git-Bash and resolve the core count portably. Mirrors
+      # csharp_builder.yml / library_shared.yml.
       shell: bash
       run: |
-        set -x
-        cmake --build . --target COOLPROP_WINDOWS_PACKAGE_INSTALLER -j $(nproc) --config $BUILD_TYPE
-
-    # - name: Tar.gz the shared library to maintain case sensitivy and file permissions
-    #   working-directory: ./build/InnoScript/bin/
-    #   shell: bash
-    #   run: |
-    #     set -x
-    #     tar -cvzf CoolProp-${{ env.COOLPROP_VERSION }}-WindowsInstaller.tar.gz ./Installers/*
-    #     
-    # - name: Create a zip archive since Windows users often cannot handle tar.gz files
-    #   working-directory: ./build/InnoScript/bin/
-    #   shell: bash
-    #   run: |
-    #     set -x
-    #     zip -r CoolProp-${{ env.COOLPROP_VERSION }}-WindowsInstaller.zip ./Installers/*
+        JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2)
+        echo "Building with -j$JOBS"
+        cmake --build build --target CoolPropMathcadWrapper -j "$JOBS" --config Release
+        cmake --build build --target install --config Release
 
     - name: Archive artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: Installers
-        path: build/InnoScript/bin/Installers
-        if-no-files-found: error
-
-    # EES ignores a library of the wrong bitness without a word, so both are
-    # verified here rather than by the user.  This runs after the installers
-    # are archived, so a failure still leaves them available for inspection.
-    - name: Check the EES libraries and stage them
-      working-directory: ./build
-      shell: bash
-      run: |-
-        python ../dev/ci/check_ees_artifacts.py InnoScript/source --stage InnoScript/bin/EES
-
-
-    - name: Archive the EES libraries
-      uses: actions/upload-artifact@v7
-      with:
-        name: EES
-        path: build/InnoScript/bin/EES
-        if-no-files-found: error
-
-    # - name: Upload TGZ or ZIP to release
-    #   if: contains(github.ref, 'refs/tags')
-    #   uses: svenstaro/upload-release-action@v2
-    #   with:
-    #     repo_token: ${{ secrets.GITHUB_TOKEN }}
-    #     file: build/InnoScript/bin/Installers/Windows/CoolProp-${{ env.COOLPROP_VERSION }}.exe
-    #     tag: ${{ github.ref }}
-    #     overwrite: true
-    #     file_glob: false
+        name: MathcadPrime
+        path: install_root/MathcadPrime
     needs:
     - alpha_bridge_inputs
     if: |-
@@ -146,7 +86,7 @@ jobs:
       actions: read
       contents: read
     concurrency:
-      group: alpha-bridge-inputs-9773b1b658fece69-${{ github.workflow }}-${{ 
+      group: alpha-bridge-inputs-d3d4d7be156ed611-${{ github.workflow }}-${{ 
         github.sha }}-${{ github.event.schedule || github.event_name }}
       cancel-in-progress: false
       queue: max
@@ -165,7 +105,7 @@ jobs:
         AB_REF: ${{ (github.event_name == 'schedule' || github.event_name == 
           'workflow_run') && 'refs/heads/master' || github.ref }}
         AB_WORKFLOW_DIGEST: 
-          efa93bd8d51986e2bf8f6ee728b7a445bec59055a845876d265479f3efedc39e
+          8904c87f3b379550d597e144c1ca59ca6499794f95dcfe7b0b530c6a6466ad06
         AB_EVENT: ${{ github.event_name }}
         AB_SCHEDULE: ${{ github.event.schedule || '' }}
         AB_VARIABLES: ${{ toJSON(vars) }}
