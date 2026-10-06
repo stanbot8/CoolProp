@@ -414,11 +414,12 @@ jobs:
           AB_REF: ${{ (github.event_name == 'schedule' || github.event_name == 
             'workflow_run') && 'refs/heads/master' || github.ref }}
           AB_WORKFLOW_DIGEST: 
-            c3b0af6705289e5a1603339e07d1726501eb77f9f143338a3133ba09d64bcbea
+            364f9fdcee165a1627319647a79182350b8f5a38cc030281be1023fc849b3f9f
           AB_EVENT: ${{ github.event_name }}
           AB_SCHEDULE: ${{ github.event.schedule || '' }}
           AB_VARIABLES: ${{ toJSON(vars) }}
           AB_INPUTS: ${{ toJSON(inputs) }}
+          AB_DEFAULT_PERMISSIONS: write
           AB_WORKFLOW_RUN: ${{ toJSON(github.event.workflow_run) }}
         shell: bash
         run: "python3 - <<'ALPHA_BRIDGE_CI_PY'\n\"\"\"Native automatic-CI input check,
@@ -493,7 +494,8 @@ jobs:
           \   \"event_payload\": event_payload,\n        \"schedule\": os.environ[\"\
           AB_SCHEDULE\"],\n        \"variables\": json.loads(os.environ[\"AB_VARIABLES\"\
           ]),\n        \"inputs\": json.loads(os.environ[\"AB_INPUTS\"]),\n      \
-          \  \"runner_image\": [os.environ.get(\"ImageOS\", \"\"), os.environ.get(\"\
+          \  \"default_workflow_permissions\": os.environ[\"AB_DEFAULT_PERMISSIONS\"\
+          ],\n        \"runner_image\": [os.environ.get(\"ImageOS\", \"\"), os.environ.get(\"\
           ImageVersion\", \"\")],\n        \"producer\": json.loads(os.environ.get(\"\
           AB_WORKFLOW_RUN\", \"null\")),\n    }\n    identity = hashlib.sha256(json.dumps(inputs,
           sort_keys=True).encode()).hexdigest()\n\n    def get(path):\n        request
